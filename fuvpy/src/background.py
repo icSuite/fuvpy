@@ -54,6 +54,12 @@ def backgroundmodel_BS(imgs,**kwargs):
         Method used to estimate `dgsigma`. `legacy` reproduces the released
         pixel-expanded regression. `binned` fits one residual variance and
         one mean model-squared value per geometry bin. Default is `legacy`.
+    spatial_weighting : {'gaussian', 'bin_population'}, optional
+        Spatial row multiplier used by the least-squares fit. `gaussian`
+        reproduces the released inverse-Gaussian multiplier.
+        `bin_population` gives every populated 0.1-wide legacy-coordinate bin
+        equal total squared influence, independently in each frame. Default
+        is `gaussian`.
     inplace : bool, optional
         If True, update the Dataset in place. Default is False (return a new Dataset).
 
@@ -80,10 +86,15 @@ def backgroundmodel_BS(imgs,**kwargs):
     n_tKnots = kwargs.pop('n_tKnots') if 'n_tKnots' in kwargs.keys() else 2
     tOrder = kwargs.pop('tOrder') if 'tOrder' in kwargs.keys() else 2
     noise_model = kwargs.pop('noise_model') if 'noise_model' in kwargs.keys() else 'legacy'
+    spatial_weighting = kwargs.pop('spatial_weighting') if 'spatial_weighting' in kwargs.keys() else 'gaussian'
     inplace = bool(kwargs.pop('inplace')) if 'inplace' in kwargs.keys() else False
 
     if noise_model not in ['legacy', 'binned']:
         raise ValueError("noise_model must be 'legacy' or 'binned'")
+    if spatial_weighting not in ['gaussian', 'bin_population']:
+        raise ValueError(
+            "spatial_weighting must be 'gaussian' or 'bin_population'"
+        )
 
     if not inplace: imgs = imgs.copy(deep=True)
 
@@ -97,6 +108,11 @@ def backgroundmodel_BS(imgs,**kwargs):
     elif imgs['id'] == 'VIS':
         fraction = np.cos(np.deg2rad(imgs['sza'].stack(z=('row','col')).values))
         if sKnots is None: sKnots= [-1,-0.1,0,0.1,0.4,1]
+        if spatial_weighting == 'bin_population':
+            raise ValueError(
+                "bin_population spatial weighting requires the legacy FUV "
+                "coordinate"
+            )
     sKnots = np.r_[np.repeat(sKnots[0],sOrder),sKnots, np.repeat(sKnots[-1],sOrder)]
 
     # Minuets since first image
@@ -137,8 +153,12 @@ def backgroundmodel_BS(imgs,**kwargs):
     # Index of data to use in model
     ind = (imgs['sza'].stack(z=('row','col')).values >= 0) & (np.isfinite(imgs[inImg].stack(z=('row','col')).values)) & (fraction>sKnots[0]) & (fraction<sKnots[-1])
 
-    # Spatial weights
-    ws = 1/np.exp(-0.5*(fraction/1.5)**2)
+    # Spatial sampling weights
+    if spatial_weighting == 'gaussian':
+        ws = 1/np.exp(-0.5*(fraction/1.5)**2)
+    else:
+        spatial_bins = np.arange(sKnots[0], sKnots[-1] + 0.1, 0.1)
+        ws = _bin_population_weights(fraction, ind, spatial_bins)
 
     # Make everything flat
     d_s = imgs[inImg].stack(z=('row','col')).values.flatten()
@@ -241,6 +261,38 @@ def _noise_bins(sKnots):
     """Return one nightside and fourteen 0.25-wide dayside bins."""
 
     return np.r_[sKnots[0], np.arange(0, 3.5 + 0.25, 0.25)]
+
+
+def _bin_population_weights(fraction, valid, bins):
+    """Equalize populated-bin influence in each image frame.
+
+    These are row multipliers, so the least-squares objective squares them.
+    The common per-frame normalization makes their mean square one over fitted
+    pixels and therefore preserves the overall scale relative to damping.
+    """
+
+    weights = np.full_like(fraction, np.nan)
+
+    for frame in range(fraction.shape[0]):
+        frame_fraction = fraction[frame, valid[frame]]
+        if frame_fraction.size == 0:
+            continue
+
+        count, _, bin_index = binned_statistic(
+            frame_fraction,
+            frame_fraction,
+            statistic='count',
+            bins=bins,
+        )
+
+        populated_bins = np.count_nonzero(count)
+        bin_count = count[bin_index - 1]
+        normalization = frame_fraction.size / populated_bins
+        weights[frame, valid[frame]] = np.sqrt(
+            normalization / bin_count
+        )
+
+    return weights
 
 
 def _binned_noise_statistics(fraction, d, dm, w, sKnots):

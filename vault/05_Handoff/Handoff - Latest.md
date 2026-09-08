@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-08
 Branch: `background_model_revision`
-Checkpoint: Step 1 complete
+Checkpoint: Steps 1 and 2 complete
 
 ## Completed
 
@@ -19,22 +19,34 @@ forms the weighted means of `dgmodel**2` and `(img-dgmodel)**2`. A bounded
 linear fit constrains both slope and intercept to be nonnegative, and
 `dgsigma` is the square root of the fitted variance at every pixel.
 
+The BS fit also has an explicit `spatial_weighting="bin_population"` option.
+It bins the legacy coordinate at width 0.1 independently in each frame and
+assigns each fitted row a multiplier proportional to `1/sqrt(N_bin)`. The
+per-frame multipliers are normalized to mean square one over fitted pixels.
+The released inverse-Gaussian multiplier remains the default through
+`spatial_weighting="gaussian"`. The new option is explicitly rejected for VIS,
+which does not use the legacy FUV coordinate. The selected spatial multiplier
+continues to enter the `dgsigma` calculation through the same combined
+robust/spatial weight used by the released path.
+
 ## Verification
 
-`pytest -q tests/test_background_dgsigma.py` passes 3 tests. The tests confirm
-the required bin edges, recover known slope and intercept behavior, and show
-that duplicating observations within one bin neither adds regression points
-nor changes the fitted spread.
+`pytest -q tests/test_background_dgsigma.py
+tests/test_background_spatial_weighting.py` passes 7 tests. The tests confirm
+the dgsigma requirements plus equal weights within a spatial bin, equal summed
+squared influence across populated bins, frame-independent calculation, and
+no effect from empty or out-of-fit locations, and restriction to the legacy
+FUV coordinate.
 
 ## Next action
 
-Implement Step 2 from `vault/02_Algorithm/Background Model Revision
+Implement Step 3 from `vault/02_Algorithm/Background Model Revision
 Implementation Plan.md` in a separate commit. Do not add experimental
 geometry, uncertainty, diagnostics, generated figures, or unrelated
 abstractions.
 
 ## Portfolio impact
 
-The clean background-model revision has completed its first scientific
-change. This is an implementation checkpoint only; package defaults and
+The clean background-model revision has completed its first two scientific
+changes. This is an implementation checkpoint only; package defaults and
 downstream production guidance are unchanged pending combined validation.
