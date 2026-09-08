@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-09-08
 Branch: `background_model_revision`
-Implementation status: Steps 1 through 3 complete
+Implementation status: Steps 1 through 4 complete
 
 ## Confirmed implementation
 
@@ -31,18 +31,29 @@ Implementation status: Steps 1 through 3 complete
   may replace the operational residual-spread field. Setting it to zero keeps
   the initial-fit estimate fixed while later model and Tukey-weight updates
   continue normally. The default remains one to reproduce released behavior.
+- `read_idl(..., measurement_variance=True)` adds conditional detector
+  measurement variance for WIC, SI12, and SI13. Ordinary loading is unchanged.
+- SI uses `a*img + poisson_offset*a**2`, where `a` is reconstructed from the
+  packaged FUVVIEW3 mission-gain and flat-field tables. Reference WIC uses
+  `10.65*img + poisson_offset*10.65**2` (coefficient rounded in prose).
+- Variance is calculated before optional WIC reflattening and retained under
+  the conditional assumption that its estimated additive background is fixed.
+  Calibration, atmospheric-response, and background-model uncertainties are
+  excluded explicitly in the metadata.
 
 ## Verification
 
-The focused tests through Step 3 pass 13 tests. They cover the
+The focused tests through Step 4 pass 26 tests. They cover the
 dgsigma bin structure, known variance relation, and population invariance,
 plus equal within-bin weights, equal bin influence, frame independence, and
 excluded/empty-bin behavior, the legacy-coordinate scope, iteration-0 scale
-retention, the released iteration-1 default, and input validation.
+retention, the released iteration-1 default, detector variance formulas,
+calibration-table selection, loader opt-in behavior, masks and metadata, and
+unsupported calibration states.
 
 ## Current boundary and next action
 
-No geometry, measurement-variance, uncertainty, diagnostics, or
-monotonic-solver changes are present on this branch. The next planned change
-is Step 4, calculating measurement variance during IDL loading, as a separate
-commit.
+No fit-level measurement weighting, geometry, background covariance,
+diagnostics, or monotonic-solver changes are present on this branch. The next
+planned change is Step 5, using measurement variance in the BS fit, as a
+separate commit.

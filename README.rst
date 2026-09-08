@@ -20,6 +20,23 @@ If needed, the magnetic coordinates can be calculated from the geographic coordi
 The solar zenith angle can be calculated based on the subsolar point, which is found using fuvpy.subsol()
 
 
+Optional detector measurement variance
+========================================
+``read_idl(..., measurement_variance=True)`` adds ``img_variance`` in the
+units of ``img`` squared for WIC, SI12, and SI13. SI variance follows the
+Poisson counting relation ``a * img``, where ``a`` is the reconstructed
+FUVVIEW3 mission-gain times flat-field multiplier. WIC uses the published
+reference compound-Poisson approximation ``10.65 * img``. An explicit
+``poisson_offset=0.5`` can be used to avoid zero plug-in variance at very low
+counts.
+
+This field describes detector statistics conditional on the supplied
+calibration. It excludes calibration uncertainty, atmospheric-response
+uncertainty, and background-model error. For WIC, it is calculated before the
+optional fuvpy reflattening and retained under the assumption that the
+estimated additive reflattening background is deterministic.
+
+
 Dependencies
 ============
 fuvpy depends on the following:

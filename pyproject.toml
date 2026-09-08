@@ -16,4 +16,7 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["fuvpy"]
+include = ["fuvpy*"]
+
+[tool.setuptools.package-data]
+fuvpy = ["data/calibration/*.idl", "data/calibration/*.sav"]

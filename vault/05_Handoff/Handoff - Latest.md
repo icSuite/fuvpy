@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-08
 Branch: `background_model_revision`
-Checkpoint: Steps 1 through 3 complete
+Checkpoint: Steps 1 through 4 complete
 
 ## Completed
 
@@ -36,24 +36,39 @@ updates proceed. The default is one, preserving the released
 `iteration <= 1` sequence. The setting must be a nonnegative integer; no
 diagnostic history machinery was added.
 
+`read_idl(..., measurement_variance=True)` now reconstructs the original
+FUVVIEW3 calibration multiplier and adds `img_variance` for WIC, SI12, and
+SI13. SI uses `a*img + poisson_offset*a**2`; WIC uses the published reference
+compound-Poisson coefficient derived from `4*0.1*612.6/23`, approximately
+10.65 AD. The optional offset defaults to zero and is recorded in attributes.
+
+The loader accepts WIC calibration flags 1 and 3 under the documented
+assumption that `IMAGE` is the flag-1-equivalent corrected-AD field and flag 3
+labels the separate `CIMAGE` product. SI requires flag 1, all sensors require
+zero FUVVIEW3 airglow subtraction, and unsupported sensors or states raise.
+Variance is calculated before optional WIC reflattening and kept unchanged
+under the conditional deterministic-additive interpretation. Package data now
+include the original small mission and flat-field tables.
+
 ## Verification
 
 `pytest -q tests/test_background_dgsigma.py
 tests/test_background_spatial_weighting.py
-tests/test_background_dgsigma_freeze.py` passes 13 tests. The tests confirm
-the Step 1 and 2 requirements, retain the iteration-0 scale while later robust
-weights update, reproduce the released iteration-1 recalculation by default,
-and reject invalid freeze settings.
+tests/test_background_dgsigma_freeze.py
+tests/test_measurement_uncertainty.py` passes 26 tests. In addition to Steps
+1--3, tests cover SI and WIC equations and offsets, representative mission and
+flat-field selection, dimensions, masks, metadata, rejected calibration
+states, pre-reflattening calculation, and unchanged default loader behavior.
 
 ## Next action
 
-Implement Step 4 from `vault/02_Algorithm/Background Model Revision
+Implement Step 5 from `vault/02_Algorithm/Background Model Revision
 Implementation Plan.md` in a separate commit. Do not add experimental
 geometry, uncertainty, diagnostics, generated figures, or unrelated
 abstractions.
 
 ## Portfolio impact
 
-The clean background-model revision has completed its first three scientific
+The clean background-model revision has completed its first four scientific
 changes. This is an implementation checkpoint only; package defaults and
 downstream production guidance are unchanged pending combined validation.
