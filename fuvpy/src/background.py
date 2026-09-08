@@ -50,6 +50,10 @@ def backgroundmodel_BS(imgs,**kwargs):
         Number of temporal knots, equally spaced between the endpoints. The default is 2 (only knots at endpoints)
     tOrder : int, optional
         Order of the temporal spline fit. The default is 2.
+    noise_model : {'legacy', 'binned'}, optional
+        Method used to estimate `dgsigma`. `legacy` reproduces the released
+        pixel-expanded regression. `binned` fits one residual variance and
+        one mean model-squared value per geometry bin. Default is `legacy`.
     inplace : bool, optional
         If True, update the Dataset in place. Default is False (return a new Dataset).
 
@@ -75,7 +79,11 @@ def backgroundmodel_BS(imgs,**kwargs):
     sKnots = kwargs.pop('sKnots') if 'sKnots' in kwargs.keys() else None
     n_tKnots = kwargs.pop('n_tKnots') if 'n_tKnots' in kwargs.keys() else 2
     tOrder = kwargs.pop('tOrder') if 'tOrder' in kwargs.keys() else 2
+    noise_model = kwargs.pop('noise_model') if 'noise_model' in kwargs.keys() else 'legacy'
     inplace = bool(kwargs.pop('inplace')) if 'inplace' in kwargs.keys() else False
+
+    if noise_model not in ['legacy', 'binned']:
+        raise ValueError("noise_model must be 'legacy' or 'binned'")
 
     if not inplace: imgs = imgs.copy(deep=True)
 
@@ -158,7 +166,16 @@ def backgroundmodel_BS(imgs,**kwargs):
 
         if iteration<=1:
             sigma = np.full_like(d_s,np.nan)
-            sigma[ind] = _noisemodel(fraction.flatten()[ind], d_s[ind],dm.flatten()[ind], w[ind]*ws[ind],sKnots)
+            if noise_model == 'legacy':
+                sigma[ind] = _noisemodel(
+                    fraction.flatten()[ind], d_s[ind], dm.flatten()[ind],
+                    w[ind]*ws[ind], sKnots,
+                )
+            else:
+                sigma[ind] = _noisemodel_binned(
+                    fraction.flatten()[ind], d_s[ind], dm.flatten()[ind],
+                    w[ind]*ws[ind], sKnots,
+                )
         w[ind] = (1 - np.minimum(1,(residuals/(tukeyVal*sigma[ind]))**2))**2
 
         if m is not None: diff = np.sqrt(np.mean((mNew-m)**2))/(1+np.sqrt(np.mean(mNew**2)))
@@ -218,6 +235,57 @@ def _noisemodel(fraction,d,dm,w,sKnots):
     popt, pcov=curve_fit(func, dm[ind2]**2, rmse[ind2]**2, bounds=(0,np.inf))
     rmseFit = np.sqrt(func(dm**2,*popt))
     return rmseFit
+
+
+def _noise_bins(sKnots):
+    """Return one nightside and fourteen 0.25-wide dayside bins."""
+
+    return np.r_[sKnots[0], np.arange(0, 3.5 + 0.25, 0.25)]
+
+
+def _binned_noise_statistics(fraction, d, dm, w, sKnots):
+    """Calculate one model/residual variance pair per populated bin."""
+
+    bins = _noise_bins(sKnots)
+    binnumber = np.digitize(fraction, bins)
+
+    model_squared = []
+    residual_squared = []
+
+    for bin_index in range(1, len(bins)):
+        in_bin = binnumber == bin_index
+        if np.sum(w[in_bin]) == 0:
+            continue
+
+        model_squared.append(np.average(dm[in_bin]**2, weights=w[in_bin]))
+        residual_squared.append(
+            np.average((d[in_bin] - dm[in_bin])**2, weights=w[in_bin])
+        )
+
+    return np.asarray(model_squared), np.asarray(residual_squared)
+
+
+def _noisemodel_binned(fraction, d, dm, w, sKnots):
+    """Estimate residual spread without repeating bin statistics per pixel."""
+
+    model_squared, residual_squared = _binned_noise_statistics(
+        fraction, d, dm, w, sKnots,
+    )
+
+    if model_squared.size < 2:
+        raise ValueError("At least two populated geometry bins are required")
+
+    def func(x, a, b):
+        return a*x+b
+
+    coefficients, _ = curve_fit(
+        func,
+        model_squared,
+        residual_squared,
+        bounds=(0, np.inf),
+    )
+
+    return np.sqrt(func(dm**2, *coefficients))
 
 
 def backgroundmodel_SH(imgs,Nsh,Msh,**kwargs):
