@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-08
 Branch: `background_model_revision`
-Checkpoint: Steps 1 and 2 complete
+Checkpoint: Steps 1 through 3 complete
 
 ## Completed
 
@@ -29,24 +29,31 @@ which does not use the legacy FUV coordinate. The selected spatial multiplier
 continues to enter the `dgsigma` calculation through the same combined
 robust/spatial weight used by the released path.
 
+`dgsigma_freeze_iteration` now controls the last zero-based IRLS iteration
+that recalculates the operational scale. With zero, the scale is estimated
+after the initial fit and retained while subsequent model and Tukey-weight
+updates proceed. The default is one, preserving the released
+`iteration <= 1` sequence. The setting must be a nonnegative integer; no
+diagnostic history machinery was added.
+
 ## Verification
 
 `pytest -q tests/test_background_dgsigma.py
-tests/test_background_spatial_weighting.py` passes 7 tests. The tests confirm
-the dgsigma requirements plus equal weights within a spatial bin, equal summed
-squared influence across populated bins, frame-independent calculation, and
-no effect from empty or out-of-fit locations, and restriction to the legacy
-FUV coordinate.
+tests/test_background_spatial_weighting.py
+tests/test_background_dgsigma_freeze.py` passes 13 tests. The tests confirm
+the Step 1 and 2 requirements, retain the iteration-0 scale while later robust
+weights update, reproduce the released iteration-1 recalculation by default,
+and reject invalid freeze settings.
 
 ## Next action
 
-Implement Step 3 from `vault/02_Algorithm/Background Model Revision
+Implement Step 4 from `vault/02_Algorithm/Background Model Revision
 Implementation Plan.md` in a separate commit. Do not add experimental
 geometry, uncertainty, diagnostics, generated figures, or unrelated
 abstractions.
 
 ## Portfolio impact
 
-The clean background-model revision has completed its first two scientific
+The clean background-model revision has completed its first three scientific
 changes. This is an implementation checkpoint only; package defaults and
 downstream production guidance are unchanged pending combined validation.

@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-09-08
 Branch: `background_model_revision`
-Implementation status: Steps 1 and 2 complete
+Implementation status: Steps 1 through 3 complete
 
 ## Confirmed implementation
 
@@ -27,16 +27,22 @@ Implementation status: Steps 1 and 2 complete
   `1/sqrt(N)`. Per-frame normalization makes the mean squared multiplier one,
   so every populated bin has equal total squared influence without changing
   the overall data-to-damping scale.
+- `dgsigma_freeze_iteration` selects the last zero-based IRLS iteration that
+  may replace the operational residual-spread field. Setting it to zero keeps
+  the initial-fit estimate fixed while later model and Tukey-weight updates
+  continue normally. The default remains one to reproduce released behavior.
 
 ## Verification
 
-The focused dgsigma and spatial-weighting tests pass 7 tests. They cover the
+The focused tests through Step 3 pass 13 tests. They cover the
 dgsigma bin structure, known variance relation, and population invariance,
 plus equal within-bin weights, equal bin influence, frame independence, and
-excluded/empty-bin behavior, and the legacy-coordinate scope.
+excluded/empty-bin behavior, the legacy-coordinate scope, iteration-0 scale
+retention, the released iteration-1 default, and input validation.
 
 ## Current boundary and next action
 
-No geometry, freeze-iteration, measurement-variance, uncertainty, diagnostics,
-or monotonic-solver changes are present on this branch. The next planned
-change is Step 3, freezing `dgsigma` after iteration 0, as a separate commit.
+No geometry, measurement-variance, uncertainty, diagnostics, or
+monotonic-solver changes are present on this branch. The next planned change
+is Step 4, calculating measurement variance during IDL loading, as a separate
+commit.

@@ -60,6 +60,10 @@ def backgroundmodel_BS(imgs,**kwargs):
         `bin_population` gives every populated 0.1-wide legacy-coordinate bin
         equal total squared influence, independently in each frame. Default
         is `gaussian`.
+    dgsigma_freeze_iteration : int, optional
+        Last zero-based IRLS iteration on which `dgsigma` is recalculated.
+        Zero retains the estimate from the initial fit. The default is 1,
+        reproducing the released calculation through iteration 1.
     inplace : bool, optional
         If True, update the Dataset in place. Default is False (return a new Dataset).
 
@@ -87,6 +91,7 @@ def backgroundmodel_BS(imgs,**kwargs):
     tOrder = kwargs.pop('tOrder') if 'tOrder' in kwargs.keys() else 2
     noise_model = kwargs.pop('noise_model') if 'noise_model' in kwargs.keys() else 'legacy'
     spatial_weighting = kwargs.pop('spatial_weighting') if 'spatial_weighting' in kwargs.keys() else 'gaussian'
+    dgsigma_freeze_iteration = kwargs.pop('dgsigma_freeze_iteration') if 'dgsigma_freeze_iteration' in kwargs.keys() else 1
     inplace = bool(kwargs.pop('inplace')) if 'inplace' in kwargs.keys() else False
 
     if noise_model not in ['legacy', 'binned']:
@@ -94,6 +99,14 @@ def backgroundmodel_BS(imgs,**kwargs):
     if spatial_weighting not in ['gaussian', 'bin_population']:
         raise ValueError(
             "spatial_weighting must be 'gaussian' or 'bin_population'"
+        )
+    if (
+        isinstance(dgsigma_freeze_iteration, (bool, np.bool_))
+        or not isinstance(dgsigma_freeze_iteration, (int, np.integer))
+        or dgsigma_freeze_iteration < 0
+    ):
+        raise ValueError(
+            "dgsigma_freeze_iteration must be a non-negative integer"
         )
 
     if not inplace: imgs = imgs.copy(deep=True)
@@ -184,7 +197,7 @@ def backgroundmodel_BS(imgs,**kwargs):
         dm=np.array(dm).squeeze()
         residuals = (d_s[ind] - dm.flatten()[ind])
 
-        if iteration<=1:
+        if iteration <= dgsigma_freeze_iteration:
             sigma = np.full_like(d_s,np.nan)
             if noise_model == 'legacy':
                 sigma[ind] = _noisemodel(
