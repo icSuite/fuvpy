@@ -36,6 +36,14 @@ uncertainty, and background-model error. For WIC, it is calculated before the
 optional fuvpy reflattening and retained under the assumption that the
 estimated additive reflattening background is deterministic.
 
+The variance can be used explicitly in the BS inversion with
+``backgroundmodel_BS(..., input_variance="img_variance",
+variance_weighted=True)``. This multiplies data-fit rows by
+``1/sqrt(img_variance)``. It does not replace the empirical ``dgsigma`` used
+for Tukey robust weighting. If ``dampingVal`` is nonzero, its scale must be
+reassessed because absolute measurement weights change the balance between
+the data and regularization.
+
 
 Dependencies
 ============

@@ -64,6 +64,14 @@ def backgroundmodel_BS(imgs,**kwargs):
         Last zero-based IRLS iteration on which `dgsigma` is recalculated.
         Zero retains the estimate from the initial fit. The default is 1,
         reproducing the released calculation through iteration 1.
+    input_variance : str, optional
+        Name of the Dataset variable containing measurement variance in the
+        input image units squared. Required when `variance_weighted=True`.
+    variance_weighted : bool, optional
+        If True, multiply each fitted row by
+        `1/sqrt(imgs[input_variance])`. Default is False. With nonzero damping,
+        reassess `dampingVal` because absolute measurement weights change the
+        balance between the data and regularization.
     inplace : bool, optional
         If True, update the Dataset in place. Default is False (return a new Dataset).
 
@@ -92,6 +100,8 @@ def backgroundmodel_BS(imgs,**kwargs):
     noise_model = kwargs.pop('noise_model') if 'noise_model' in kwargs.keys() else 'legacy'
     spatial_weighting = kwargs.pop('spatial_weighting') if 'spatial_weighting' in kwargs.keys() else 'gaussian'
     dgsigma_freeze_iteration = kwargs.pop('dgsigma_freeze_iteration') if 'dgsigma_freeze_iteration' in kwargs.keys() else 1
+    input_variance = kwargs.pop('input_variance') if 'input_variance' in kwargs.keys() else None
+    variance_weighted = bool(kwargs.pop('variance_weighted')) if 'variance_weighted' in kwargs.keys() else False
     inplace = bool(kwargs.pop('inplace')) if 'inplace' in kwargs.keys() else False
 
     if noise_model not in ['legacy', 'binned']:
@@ -179,6 +189,45 @@ def backgroundmodel_BS(imgs,**kwargs):
     ws = ws.flatten()
     w = np.ones_like(d_s)
 
+    # Measurement precision is a separate row multiplier. It affects only the
+    # background inversion, not the empirical dgsigma regression or the Tukey
+    # residual scaling below.
+    measurement_w = np.ones_like(d_s)
+    if variance_weighted:
+        if not isinstance(input_variance, str):
+            raise ValueError(
+                "input_variance must name a Dataset variable when "
+                "variance_weighted=True"
+            )
+        if input_variance not in imgs:
+            raise ValueError(
+                f"Input variance variable '{input_variance}' is not in imgs"
+            )
+
+        try:
+            measurement_variance = (
+                imgs[input_variance]
+                .transpose('date', 'row', 'col')
+                .stack(z=('row', 'col'))
+                .values
+                .flatten()
+            )
+        except ValueError:
+            raise ValueError(
+                "Input variance must have date, row, and col dimensions"
+            )
+
+        if measurement_variance.shape != d_s.shape:
+            raise ValueError("Input variance must have the same shape as the image")
+        if np.any(~np.isfinite(measurement_variance[ind])):
+            raise ValueError("Input variance must be finite at fitted pixels")
+        if np.any(measurement_variance[ind] <= 0):
+            raise ValueError(
+                "Input variance must be strictly positive at fitted pixels"
+            )
+
+        measurement_w[ind] = 1/np.sqrt(measurement_variance[ind])
+
     # Damping (zeroth-order Tikhonov regularization)
     damping = dampingVal*np.ones(G_s.shape[1])
     R = np.diag(damping)
@@ -188,7 +237,16 @@ def backgroundmodel_BS(imgs,**kwargs):
     iteration = 0
     m = None
     while (diff>stop)&(iteration < 100):
-        m_s = lstsq((G_s[ind,:]*w[ind,None]*ws[ind,None]).T@(G_s[ind,:]*w[ind,None]*ws[ind,None])+R,(G_s[ind,:]*w[ind,None]*ws[ind,None]).T@(d_s[ind]*w[ind]*ws[ind]),lapack_driver='gelsy')[0]
+        # Keep robust, spatial-sampling, and measurement-precision roles
+        # visible before forming the weighted least-squares system.
+        fit_w = w[ind] * ws[ind] * measurement_w[ind]
+        weighted_design = G_s[ind, :] * fit_w[:, None]
+        weighted_data = d_s[ind] * fit_w
+        m_s = lstsq(
+            weighted_design.T@weighted_design + R,
+            weighted_design.T@weighted_data,
+            lapack_driver='gelsy',
+        )[0]
         mNew    = M@m_s.reshape((n_scp, n_tcp)).T
         dm=[]
         for i, tt in enumerate(time):

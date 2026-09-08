@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-08
 Branch: `background_model_revision`
-Checkpoint: Steps 1 through 4 complete
+Checkpoint: Steps 1 through 5 complete
 
 ## Completed
 
@@ -50,25 +50,41 @@ Variance is calculated before optional WIC reflattening and kept unchanged
 under the conditional deterministic-additive interpretation. Package data now
 include the original small mission and flat-field tables.
 
+The BS fit now has an explicit opt-in measurement weighting path:
+`input_variance` names the Dataset variance variable and
+`variance_weighted=True` applies `1/sqrt(variance)` to each fitted data row.
+The calculation visibly combines robust, spatial-sampling, and measurement
+row multipliers. Measurement variance is deliberately absent from both
+empirical dgsigma regressions and Tukey residual scaling. Fitted variance must
+be finite and strictly positive. The default remains unweighted.
+
+Absolute measurement precision changes the balance between data and the
+existing regularization term. Any nonzero `dampingVal` therefore requires a
+new scale assessment rather than assuming its released tuning transfers.
+
 ## Verification
 
 `pytest -q tests/test_background_dgsigma.py
 tests/test_background_spatial_weighting.py
 tests/test_background_dgsigma_freeze.py
-tests/test_measurement_uncertainty.py` passes 26 tests. In addition to Steps
+tests/test_measurement_uncertainty.py
+tests/test_background_measurement_weighting.py` passes 35 tests. In addition to Steps
 1--3, tests cover SI and WIC equations and offsets, representative mission and
 flat-field selection, dimensions, masks, metadata, rejected calibration
 states, pre-reflattening calculation, and unchanged default loader behavior.
+Step 5 tests confirm zero-damping equivalence for constant variance, reduced
+influence of a high-variance observation, separation from dgsigma estimation,
+and rejection of invalid fitted variance.
 
 ## Next action
 
-Implement Step 5 from `vault/02_Algorithm/Background Model Revision
+Implement Step 6 from `vault/02_Algorithm/Background Model Revision
 Implementation Plan.md` in a separate commit. Do not add experimental
 geometry, uncertainty, diagnostics, generated figures, or unrelated
 abstractions.
 
 ## Portfolio impact
 
-The clean background-model revision has completed its first four scientific
+The clean background-model revision has completed its first five scientific
 changes. This is an implementation checkpoint only; package defaults and
 downstream production guidance are unchanged pending combined validation.

@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-09-08
 Branch: `background_model_revision`
-Implementation status: Steps 1 through 4 complete
+Implementation status: Steps 1 through 5 complete
 
 ## Confirmed implementation
 
@@ -40,20 +40,29 @@ Implementation status: Steps 1 through 4 complete
   the conditional assumption that its estimated additive background is fixed.
   Calibration, atmospheric-response, and background-model uncertainties are
   excluded explicitly in the metadata.
+- `backgroundmodel_BS(..., input_variance="img_variance",
+  variance_weighted=True)` applies `1/sqrt(variance)` only to the background
+  inversion. Robust Tukey, spatial, and measurement row multipliers remain
+  separate and visible. Empirical `dgsigma` and Tukey residual scaling do not
+  use measurement variance.
+- Measurement variance must be finite and strictly positive at every fitted
+  pixel. Nonzero damping must be reassessed because absolute measurement
+  weights alter the data-to-regularization balance. The released unweighted
+  fit remains the default.
 
 ## Verification
 
-The focused tests through Step 4 pass 26 tests. They cover the
+The focused tests through Step 5 pass 35 tests. They cover the
 dgsigma bin structure, known variance relation, and population invariance,
 plus equal within-bin weights, equal bin influence, frame independence, and
 excluded/empty-bin behavior, the legacy-coordinate scope, iteration-0 scale
 retention, the released iteration-1 default, detector variance formulas,
 calibration-table selection, loader opt-in behavior, masks and metadata, and
-unsupported calibration states.
+unsupported calibration states, plus constant-variance equivalence, reduced
+high-variance influence, dgsigma separation, and invalid fit variance.
 
 ## Current boundary and next action
 
-No fit-level measurement weighting, geometry, background covariance,
-diagnostics, or monotonic-solver changes are present on this branch. The next
-planned change is Step 5, using measurement variance in the BS fit, as a
-separate commit.
+No geometry, background covariance, diagnostics, or monotonic-solver changes
+are present on this branch. The next planned change is Step 6, adding the
+optional monotonic spatial solver, as a separate commit.
