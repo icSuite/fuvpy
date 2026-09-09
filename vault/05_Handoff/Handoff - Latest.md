@@ -63,6 +63,17 @@ Absolute measurement precision changes the balance between data and the
 existing regularization term. Any nonzero `dampingVal` therefore requires a
 new scale assessment rather than assuming its released tuning transfers.
 
+The optional `asymmetric_legacy=True` coordinate starts from
+`x=cos(SZA)/cos(DZA)`, preserves `x>=0`, and maps negative values to
+`nightside_width*tanh(x/nightside_width)`. The width defaults to 0.2 and must
+be finite and positive. When knots are omitted, the negative anchors are
+`[-w, -0.75w, -0.25w]` and the remaining anchors stay
+`[0, 0.25, 1.5, 3.5]`; only tiny endpoint padding is added for strict support.
+Custom knots are respected. The released coordinate remains the default, and
+VIS rejects asymmetric mode. The transform uses the existing BS design,
+noise, spatial weighting, robust weighting, measurement weighting, and
+monotonic machinery without alternative paths.
+
 The optional monotonic BS fit uses a free first spatial coefficient plus
 nonnegative increments for every temporal basis component. This matches the
 existing spatial-outer, temporal-inner coefficient ordering and leaves the
@@ -133,6 +144,15 @@ Diagnostics tests cover default absence and opt-in scalar converged values.
 `python examples/scripts/validate_background_revision.py --help` also passes.
 No orbit model comparison was run.
 
+`pytest -q tests/test_background_asymmetric_legacy.py
+tests/test_background_dgsigma.py tests/test_background_spatial_weighting.py
+tests/test_background_dgsigma_freeze.py
+tests/test_background_measurement_weighting.py
+tests/test_background_monotonic.py tests/test_background_diagnostics.py`
+passes 46 tests. Asymmetric tests cover the exact mapping, released-coordinate
+identity, default width and knot anchors, a custom width, invalid widths, VIS
+rejection, preserved custom knots, and a combined revised-option fit.
+
 ## Next action
 
 Mount the complete native-grid orbit data, generate and save the complete WIC
@@ -153,7 +173,8 @@ not change package defaults before the complete-orbit comparison is accepted.
 ## Portfolio impact
 
 The clean background-model revision has completed Steps 1 through 6 and has a
-reusable combined-validation script. Scientific validation remains pending
+reusable combined-validation script plus one isolated asymmetric legacy
+coordinate option. Scientific validation remains pending
 because `/home/bing/dtu_server` is not mounted and the complete WIC input must
 include correctly generated pre-reflattening variance; package defaults and
 downstream production guidance are unchanged.

@@ -44,6 +44,15 @@ for Tukey robust weighting. If ``dampingVal`` is nonzero, its scale must be
 reassessed because absolute measurement weights change the balance between
 the data and regularization.
 
+``backgroundmodel_BS(..., asymmetric_legacy=True)`` keeps the legacy
+``cos(SZA)/cos(DZA)`` coordinate unchanged on the dayside and maps negative
+values to ``nightside_width*tanh(x/nightside_width)``. The default width is
+0.2. Its default spatial knots scale the three negative anchors with that
+width while retaining dayside anchors at 0, 0.25, 1.5, and 3.5. Custom
+``sKnots`` remain authoritative. The released coordinate is unchanged by the
+default ``asymmetric_legacy=False`` setting, and this option is unavailable
+for VIS.
+
 ``backgroundmodel_BS(..., monotonic=True)`` optionally constrains each
 temporal component's spatial B-spline coefficients to be non-decreasing with
 the existing ``cos(SZA)/cos(DZA)`` coordinate. The default ``monotonic=False``

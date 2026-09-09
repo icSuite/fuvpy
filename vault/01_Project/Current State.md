@@ -50,6 +50,14 @@ Validation status: combined complete-orbit script ready; execution blocked
   pixel. Nonzero damping must be reassessed because absolute measurement
   weights alter the data-to-regularization balance. The released unweighted
   fit remains the default.
+- `backgroundmodel_BS(..., asymmetric_legacy=True)` optionally preserves
+  nonnegative `cos(SZA)/cos(DZA)` values and maps negative values to
+  `nightside_width*tanh(x/nightside_width)`. The default width is 0.2; it must
+  be finite and positive. The released coordinate remains the default.
+- With omitted `sKnots`, asymmetric mode uses width-scaled negative anchors
+  `[-w, -0.75w, -0.25w]` and the existing nonnegative anchors
+  `[0, 0.25, 1.5, 3.5]`, with tiny endpoint padding for the strict fit support.
+  Custom knots remain unchanged, and VIS rejects asymmetric mode.
 - `backgroundmodel_BS(..., monotonic=True)` optionally represents each
   temporal component's spatial coefficients as a free baseline followed by
   nonnegative increments. The temporal spline, legacy coordinate, IRLS, and
@@ -98,10 +106,16 @@ selection, plotting scales, stored WIC variance preservation and
 rejection when absent or untraceable, SI variance attachment, and opt-in
 scalar convergence diagnostics. CLI help passes.
 
+The 46 focused BS tests also pass after adding asymmetric legacy coverage.
+They verify the exact transform, unchanged legacy default, default and custom
+width behavior, default and custom knots, invalid-width and VIS rejection,
+and a combined fit using all revised BS options.
+
 ## Current boundary and next action
 
-No geometry variants, background covariance, diagnostic histories, or
-generated figures are present on this branch. Complete-orbit execution is
+No geometry models beyond the single opt-in asymmetric legacy transform,
+background covariance, diagnostic histories, or generated figures are present
+on this branch. Complete-orbit execution is
 blocked because `/home/bing/dtu_server` is not mounted, the available
 icBuilder example IDL files are partial sequences, and a complete WIC orbit
 must be regenerated with stored pre-reflattening variance. Package defaults
