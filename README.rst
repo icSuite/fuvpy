@@ -51,6 +51,13 @@ keeps the released solver. ``monotonic_solver="normal"`` is the low-cost
 operational solver; ``"full"`` retains all weighted image rows as a reference
 calculation.
 
+For concise fit monitoring, ``backgroundmodel_BS(..., diagnostics=True)``
+adds scalar ``dgfit_iterations`` and ``dgfit_converged`` outputs. They are
+absent by default. Complete-orbit WIC comparisons must use an
+``img_variance`` saved from ``read_idl(..., measurement_variance=True)``;
+variance cannot be reconstructed correctly from an already reflattened WIC
+``img`` field.
+
 
 Dependencies
 ============

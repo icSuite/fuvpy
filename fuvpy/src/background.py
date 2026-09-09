@@ -182,6 +182,9 @@ def backgroundmodel_BS(imgs,**kwargs):
         `normal` first reduces the weighted image rows to a small normal
         system and is the operational default. `full` applies the same bounds
         to all weighted rows as a reference calculation.
+    diagnostics : bool, optional
+        If True, add scalar `dgfit_iterations` and `dgfit_converged` fields.
+        Default is False.
     inplace : bool, optional
         If True, update the Dataset in place. Default is False (return a new Dataset).
 
@@ -214,6 +217,7 @@ def backgroundmodel_BS(imgs,**kwargs):
     variance_weighted = bool(kwargs.pop('variance_weighted')) if 'variance_weighted' in kwargs.keys() else False
     monotonic = bool(kwargs.pop('monotonic')) if 'monotonic' in kwargs.keys() else False
     monotonic_solver = kwargs.pop('monotonic_solver') if 'monotonic_solver' in kwargs.keys() else 'normal'
+    diagnostics = bool(kwargs.pop('diagnostics')) if 'diagnostics' in kwargs.keys() else False
     inplace = bool(kwargs.pop('inplace')) if 'inplace' in kwargs.keys() else False
 
     if noise_model not in ['legacy', 'binned']:
@@ -413,6 +417,11 @@ def backgroundmodel_BS(imgs,**kwargs):
     imgs['dgsigma'] = (['date','row','col'],(sigma).reshape((n_t,len(imgs.row),len(imgs.col))))
     imgs['dgnorm_residual'] = normR
     imgs['dgnorm_model'] = normM
+    if diagnostics:
+        imgs['dgfit_iterations'] = iteration
+        imgs['dgfit_converged'] = (
+            iteration < 100 and np.isfinite(diff) and diff <= stop
+        )
 
     # Remove pixels outside model scope
     ind = (imgs.sza>=0)
@@ -428,6 +437,13 @@ def backgroundmodel_BS(imgs,**kwargs):
     imgs['dgsigma'].attrs = {'long_name': 'BS model spread'}
     imgs['dgnorm_residual'].attrs = {'long_name': 'BS model residual norm'}
     imgs['dgnorm_model'].attrs = {'long_name': 'BS model solution norm'}
+    if diagnostics:
+        imgs['dgfit_iterations'].attrs = {
+            'long_name': 'Number of BS IRLS iterations'
+        }
+        imgs['dgfit_converged'].attrs = {
+            'long_name': 'BS IRLS convergence status'
+        }
     # Return the new DataSet if not inplace 
     if not inplace:
         return imgs

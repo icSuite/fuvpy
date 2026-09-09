@@ -61,12 +61,19 @@ Validation status: combined complete-orbit script ready; execution blocked
 - `examples/scripts/validate_background_revision.py` accepts explicit native
   WIC, SI12, and SI13 orbit NetCDF files and runs the six cumulative Step 7
   variants. It writes representative four-field comparison figures and a CSV
-  of fit time and robust summary metrics. It is a comparison tool, not a
-  validation result.
+  of fit time, robust summary metrics, iteration count, and convergence. It is
+  a comparison tool, not a validation result.
+- Existing detector variance is preserved and checked on the fitted support.
+  SI variance can be reconstructed when absent because SI is not reflattened.
+  WIC variance cannot be reconstructed from the normally reflattened NetCDF
+  image; WIC input without stored pre-reflattening `img_variance` is rejected
+  with instructions to generate it through `read_idl`.
+- `backgroundmodel_BS(..., diagnostics=True)` adds only the scalar
+  `dgfit_iterations` and `dgfit_converged` fields. They are absent by default.
 
 ## Verification
 
-The focused implementation and script-helper tests pass 47 tests. They cover the
+The focused implementation and script-helper tests pass 52 tests. They cover the
 dgsigma bin structure, known variance relation, and population invariance,
 plus equal within-bin weights, equal bin influence, frame independence, and
 excluded/empty-bin behavior, the legacy-coordinate scope, iteration-0 scale
@@ -76,12 +83,15 @@ unsupported calibration states, plus constant-variance equivalence, reduced
 high-variance influence, dgsigma separation, invalid fit variance, monotonic
 coefficient ordering and profiles, normal/full equivalence, preserved ordinary
 behavior, explicit bounded-solver failure, cumulative variant construction,
-frame selection, plotting scales, and variance attachment. CLI help passes.
+frame selection, plotting scales, stored WIC variance preservation and
+rejection when absent, SI variance attachment, and opt-in scalar convergence
+diagnostics. CLI help passes.
 
 ## Current boundary and next action
 
-No geometry variants, background covariance, diagnostics, or generated
-figures are present on this branch. Complete-orbit execution is blocked because
-`/home/bing/dtu_server` is not mounted, and the available icBuilder example
-IDL files are partial sequences. Package defaults remain unchanged pending
-complete-orbit validation.
+No geometry variants, background covariance, diagnostic histories, or
+generated figures are present on this branch. Complete-orbit execution is
+blocked because `/home/bing/dtu_server` is not mounted, the available
+icBuilder example IDL files are partial sequences, and a complete WIC orbit
+must be regenerated with stored pre-reflattening variance. Package defaults
+remain unchanged pending complete-orbit validation.

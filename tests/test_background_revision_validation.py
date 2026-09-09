@@ -2,9 +2,8 @@ import importlib.util
 from pathlib import Path
 
 import numpy as np
+import pytest
 import xarray as xr
-
-from fuvpy.src.measurement_uncertainty import wic_variance_coefficient
 
 
 SCRIPT_PATH = (
@@ -79,14 +78,22 @@ def test_plot_limits_are_shared_and_robust():
     assert lower < 0 < upper
 
 
-def test_wic_variance_attachment_uses_half_count_offset():
+def _variance_dataset(sensor="WIC", include_variance=False):
     dataset = xr.Dataset(
         {
             "img": (
                 ("date", "row", "col"),
                 np.array([[[0.0, 10.0]], [[20.0, np.nan]]]),
             ),
-            "id": xr.DataArray("WIC"),
+            "sza": (
+                ("date", "row", "col"),
+                np.full((2, 1, 2), 60.0),
+            ),
+            "dza": (
+                ("date", "row", "col"),
+                np.zeros((2, 1, 2)),
+            ),
+            "id": xr.DataArray(sensor),
         },
         coords={
             "date": [np.datetime64("2000-01-01"), np.datetime64("2000-01-02")],
@@ -94,10 +101,53 @@ def test_wic_variance_attachment_uses_half_count_offset():
             "col": [0, 1],
         },
     )
+    if include_variance:
+        dataset["img_variance"] = (
+            dataset["img"].dims,
+            np.array([[[7.0, 8.0]], [[9.0, np.nan]]]),
+        )
+        dataset["img_variance"].attrs["source"] = "pre-reflattening img"
+
+    return dataset
+
+
+def test_stored_wic_variance_is_preserved():
+    dataset = _variance_dataset(include_variance=True)
+    original = dataset["img_variance"].copy(deep=True)
 
     result = validation._attach_measurement_variance(dataset, "WIC")
-    coefficient = wic_variance_coefficient()
-    expected = coefficient*dataset["img"] + 0.5*coefficient**2
+
+    np.testing.assert_allclose(result["img_variance"], original)
+    assert result["img_variance"].attrs == original.attrs
+
+
+def test_wic_without_stored_pre_reflattening_variance_is_rejected():
+    with pytest.raises(ValueError, match="read_idl"):
+        validation._attach_measurement_variance(
+            _variance_dataset(),
+            "WIC",
+        )
+
+
+def test_invalid_stored_variance_on_fitted_support_is_rejected():
+    dataset = _variance_dataset(include_variance=True)
+    dataset["img_variance"].values[0, 0, 0] = 0.0
+
+    with pytest.raises(ValueError, match="strictly positive"):
+        validation._attach_measurement_variance(dataset, "WIC")
+
+
+def test_missing_si_variance_is_attached_from_calibration(monkeypatch):
+    dataset = _variance_dataset(sensor="SI12")
+    multiplier = np.full(dataset["img"].shape, 2.0)
+    monkeypatch.setattr(
+        validation,
+        "calibration_multiplier",
+        lambda dates, sensor: multiplier,
+    )
+
+    result = validation._attach_measurement_variance(dataset, "SI12")
+    expected = 2*dataset["img"] + 0.5*2**2
 
     assert result["img_variance"].dims == dataset["img"].dims
     np.testing.assert_allclose(result["img_variance"], expected)

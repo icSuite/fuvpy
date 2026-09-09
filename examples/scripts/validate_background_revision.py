@@ -22,7 +22,6 @@ from fuvpy.src.background import backgroundmodel_BS
 from fuvpy.src.measurement_uncertainty import (
     calibration_multiplier,
     si_measurement_variance,
-    wic_measurement_variance,
 )
 
 
@@ -137,40 +136,70 @@ def _load_native_orbit(path, expected_sensor):
 
 
 def _attach_measurement_variance(dataset, sensor):
-    """Attach the Step 4 variance model with a 0.5 count offset."""
+    """Preserve stored variance or attach the SI Step 4 variance model."""
 
-    image = np.asarray(dataset["img"])
+    if "img_variance" in dataset:
+        variance = dataset["img_variance"]
+        if set(variance.dims) != {"date", "row", "col"}:
+            raise ValueError(
+                "Stored img_variance must have date, row, and col dimensions"
+            )
+        variance = variance.transpose("date", "row", "col")
+        if variance.shape != dataset["img"].shape:
+            raise ValueError("Stored img_variance must match the img shape")
+
+        fraction = (
+            np.cos(np.deg2rad(dataset["sza"]))
+            / np.cos(np.deg2rad(dataset["dza"]))
+        )
+        fitted = (
+            (dataset["sza"] >= 0)
+            & np.isfinite(dataset["img"])
+            & (fraction > -3.5)
+            & (fraction < 3.5)
+        )
+        fitted_variance = np.asarray(variance)[np.asarray(fitted)]
+        if np.any(~np.isfinite(fitted_variance)):
+            raise ValueError("Stored img_variance must be finite at fitted pixels")
+        if np.any(fitted_variance <= 0):
+            raise ValueError(
+                "Stored img_variance must be strictly positive at fitted pixels"
+            )
+
+        dataset["img_variance"] = variance
+        return dataset
 
     if sensor == "WIC":
-        variance = wic_measurement_variance(image, poisson_offset=0.5)
-        valid = np.isfinite(image)
-    else:
-        multiplier = calibration_multiplier(dataset["date"].values, sensor)
-        variance = si_measurement_variance(
-            image,
-            multiplier,
-            poisson_offset=0.5,
+        raise ValueError(
+            "WIC orbit lacks pre-reflattening img_variance; load and save the "
+            "complete orbit with read_idl(..., measurement_variance=True, "
+            "poisson_offset=0.5)"
         )
-        valid = np.isfinite(image) & np.isfinite(multiplier) & (multiplier > 0)
-        dataset["calibration_multiplier"] = (
-            ("date", "row", "col"),
-            np.where(valid, multiplier, np.nan),
-        )
-        dataset["calibration_multiplier"].attrs = {
-            "long_name": "FUVVIEW3 mission correction times flat field",
-            "units": "1",
-        }
+
+    image = np.asarray(dataset["img"])
+    multiplier = calibration_multiplier(dataset["date"].values, sensor)
+    variance = si_measurement_variance(
+        image,
+        multiplier,
+        poisson_offset=0.5,
+    )
+    valid = np.isfinite(image) & np.isfinite(multiplier) & (multiplier > 0)
+    dataset["calibration_multiplier"] = (
+        ("date", "row", "col"),
+        np.where(valid, multiplier, np.nan),
+    )
+    dataset["calibration_multiplier"].attrs = {
+        "long_name": "FUVVIEW3 mission correction times flat field",
+        "units": "1",
+    }
 
     dataset["img_variance"] = (
         ("date", "row", "col"),
         np.where(valid, variance, np.nan),
     )
-    variance_units = (
-        "AD unit squared" if sensor == "WIC" else "corrected count squared"
-    )
     dataset["img_variance"].attrs = {
         "long_name": "Conditional detector measurement variance of img",
-        "units": variance_units,
+        "units": "corrected count squared",
         "poisson_offset": 0.5,
         "excludes": (
             "calibration uncertainty, background-model discrepancy, and "
@@ -237,6 +266,8 @@ def _summary_metrics(sensor, variant, elapsed, result):
         "dgweight_below_half_fraction": float(np.mean(weights < 0.5)),
         "dgnorm_residual": float(result["dgnorm_residual"]),
         "dgnorm_model": float(result["dgnorm_model"]),
+        "dgfit_iterations": int(result["dgfit_iterations"]),
+        "dgfit_converged": bool(result["dgfit_converged"]),
     }
 
 
@@ -337,6 +368,7 @@ def main(argv=None):
         "dampingVal": args.damping,
         "tukeyVal": args.tukey,
         "stop": args.stop,
+        "diagnostics": True,
     }
 
     metric_rows = []

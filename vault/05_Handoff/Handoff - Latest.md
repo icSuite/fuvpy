@@ -74,11 +74,21 @@ ordinary unconstrained solver, and failures raise `RuntimeError` explicitly.
 
 `examples/scripts/validate_background_revision.py` is a concise Step 7
 comparison tool. It requires explicit complete native-grid WIC, SI12, and SI13
-orbit NetCDF paths, attaches the Step 4 variance with `poisson_offset=0.5`, and
-runs the six cumulative variants from released through monotonic. It writes a
-few representative figures showing `dgmodel`, `dgimg`, `dgsigma`, and
-`dgweight`, plus a CSV containing fit time and robust summary metrics. It does
-not run the SH model or change package defaults.
+orbit NetCDF paths and runs the six cumulative variants from released through
+monotonic. Existing `img_variance` is preserved and checked on fitted pixels.
+Missing SI variance is attached with `poisson_offset=0.5`; missing WIC variance
+is rejected because the normally stored WIC image is already reflattened and
+cannot reproduce the loader's pre-reflattening calculation. A suitable WIC
+orbit must be loaded and saved with
+`read_idl(..., measurement_variance=True, poisson_offset=0.5)`.
+
+The script writes representative figures showing `dgmodel`, `dgimg`,
+`dgsigma`, and `dgweight`, plus a CSV containing fit time, robust summary
+metrics, IRLS iteration count, and convergence. The last two are supplied by
+the minimal opt-in `backgroundmodel_BS(..., diagnostics=True)` fields
+`dgfit_iterations` and `dgfit_converged`; neither field is returned by default.
+No diagnostic histories were added. The script does not run the SH model or
+change package defaults.
 
 ## Verification
 
@@ -88,7 +98,8 @@ tests/test_background_dgsigma_freeze.py
 tests/test_measurement_uncertainty.py
 tests/test_background_measurement_weighting.py
 tests/test_background_monotonic.py
-tests/test_background_revision_validation.py` passes 47 tests. In addition to Steps
+tests/test_background_revision_validation.py
+tests/test_background_diagnostics.py` passes 52 tests. In addition to Steps
 1--3, tests cover SI and WIC equations and offsets, representative mission and
 flat-field selection, dimensions, masks, metadata, rejected calibration
 states, pre-reflattening calculation, and unchanged default loader behavior.
@@ -99,13 +110,16 @@ Step 6 tests cover coefficient ordering, monotonic legacy-coordinate profiles,
 normal/full equivalence with combined row weights and damping, unchanged
 ordinary behavior, and explicit solver failures.
 The script tests cover the exact cumulative variant sequence, representative
-frames, shared robust limits, WIC variance attachment, and required CLI
-arguments. `python examples/scripts/validate_background_revision.py --help`
-also passes. No orbit model comparison was run.
+frames, shared robust limits, stored WIC variance preservation, explicit WIC
+rejection when variance is absent or invalid, SI attachment, and required CLI
+arguments. Diagnostics tests cover default absence and opt-in scalar converged
+values. `python examples/scripts/validate_background_revision.py --help` also
+passes. No orbit model comparison was run.
 
 ## Next action
 
-Mount the complete native-grid orbit data, then run the script with explicit
+Mount the complete native-grid orbit data, generate and save the complete WIC
+orbit with pre-reflattening `img_variance`, then run the script with explicit
 paths, for example:
 
 ```bash
@@ -123,5 +137,6 @@ not change package defaults before the complete-orbit comparison is accepted.
 
 The clean background-model revision has completed Steps 1 through 6 and has a
 reusable combined-validation script. Scientific validation remains pending
-because `/home/bing/dtu_server` is not mounted; package defaults and downstream
-production guidance are unchanged.
+because `/home/bing/dtu_server` is not mounted and the complete WIC input must
+include correctly generated pre-reflattening variance; package defaults and
+downstream production guidance are unchanged.
