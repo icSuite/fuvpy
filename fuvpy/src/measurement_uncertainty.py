@@ -25,17 +25,9 @@ WIC_EQUIVALENT_QUANTA = 23.0
 
 CALIBRATION_DIRECTORY = Path(__file__).resolve().parents[1] / "data" / "calibration"
 
-FLATFIELD_FILES = {
-    "WIC": "wic_flatfield_dbase.idl",
-    "SI12": "si12_flatfield_dbase.idl",
-    "SI13": "si_flatfield_dbase.idl"
-}
+FLATFIELD_FILES = {"WIC": "wic_flatfield_dbase.idl", "SI12": "si12_flatfield_dbase.idl", "SI13": "si_flatfield_dbase.idl"}
 
-MISSION_FIELDS = {
-    "WIC": "finalwic",
-    "SI12": "finals12",
-    "SI13": "finals13"
-}
+MISSION_FIELDS = {"WIC": "finalwic", "SI12": "finals12", "SI13": "finals13"}
 
 BOOM_LOSS_DATE = datetime(2000, 1, 1) + timedelta(days=277)
 

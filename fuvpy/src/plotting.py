@@ -122,10 +122,9 @@ def plot_backgroundmodel_BS(img,**kwargs):
     ax2 = plt.subplot(gs2[0])
     ax2c = plt.subplot(gs2[1])
     pax2 = pp(ax2)
-    plotimg(img,'img',pax=pax2,crange=[0,cmax1])
+    plotimg(img, 'img', pax=pax2, crange=[0, cmax1])
     ax2c.axis('off')
-    plt.colorbar(pax2.ax.collections[0],orientation='horizontal',ax=ax2c,fraction=1,
-                 extend='max')
+    plt.colorbar(pax2.ax.collections[0],orientation='horizontal',ax=ax2c,fraction=1, extend='max')
 
     # Polar plot of the dayglow model
     gs3 = gridspec.GridSpecFromSubplotSpec(2,1,height_ratios=[90,10],subplot_spec=gs[1,1])
@@ -134,8 +133,7 @@ def plot_backgroundmodel_BS(img,**kwargs):
     pax3 = pp(ax3)
     plotimg(img,'dgmodel',pax=pax3,crange=[0,cmax1])
     ax3c.axis('off')
-    plt.colorbar(pax3.ax.collections[0],orientation='horizontal',ax=ax3c,fraction=1,
-                 extend='max')
+    plt.colorbar(pax3.ax.collections[0],orientation='horizontal',ax=ax3c,fraction=1, extend='max')
 
     # Polar plot of the dayglow-corrected image
     gs4 = gridspec.GridSpecFromSubplotSpec(2,1,height_ratios=[90,10],subplot_spec=gs[1,2])
@@ -144,8 +142,7 @@ def plot_backgroundmodel_BS(img,**kwargs):
     pax4 = pp(ax4)
     plotimg(img,'dgimg',pax=pax4,crange=[-cmax2,cmax2],cmap='coolwarm')
     ax4c.axis('off')
-    plt.colorbar(pax4.ax.collections[0],orientation='horizontal',ax=ax4c,fraction=1,
-                 extend='both')
+    plt.colorbar(pax4.ax.collections[0],orientation='horizontal',ax=ax4c,fraction=1, extend='both')
 
     ax1.set_title(img['id'].values.tolist() + ': ' + img['date'].dt.strftime('%Y-%m-%d %H:%M:%S').values.tolist())
     ax2.set_title('Original image')
@@ -325,8 +322,7 @@ def pplot(imgs,inImg,**kwargs):
         mlt = imgs.isel(date=i)['mlt'].values.copy()
         image = imgs.isel(date=i)[inImg].values.copy()
         pax.plotimg(mlat,mlt,image,crange=crange,**kwargs)
-        pax.ax.set_title(imgs['id'].values.tolist() + ': ' +
-             imgs.isel(date=i)['date'].dt.strftime('%Y-%m-%d %H:%M:%S').values.tolist())
+        pax.ax.set_title(imgs['id'].values.tolist() + ': ' + imgs.isel(date=i)['date'].dt.strftime('%Y-%m-%d %H:%M:%S').values.tolist())
 
     if add_cbar:
         cax = plt.subplot(gs0[1])

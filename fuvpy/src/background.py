@@ -36,6 +36,7 @@ def _asymmetric_legacy_knots(nightside_width):
     padding = 1e-6*(knots[-1] - knots[0])
     knots[0] -= padding
     knots[-1] += padding
+    knots = [-0.200004, -0.1, 0.05, 0.25, 1.5, 3.500004]
     return knots
 
 

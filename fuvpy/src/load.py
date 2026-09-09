@@ -16,22 +16,9 @@ from datetime import datetime
 # from scipy.io import idl
 from scipy.io import readsav
 
-from fuvpy.src.measurement_uncertainty import (
-    calibration_multiplier,
-    si_measurement_variance,
-    wic_measurement_variance,
-)
+from fuvpy.src.measurement_uncertainty import calibration_multiplier, si_measurement_variance, wic_measurement_variance
 
-
-def read_idl(
-    filenames,
-    dzalim=80,
-    hemisphere=None,
-    reflat=True,
-    remove_bad=True,
-    measurement_variance=False,
-    poisson_offset=0.0,
-):
+def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True, measurement_variance=False, poisson_offset=0.0):
     '''
     Load FUV images into a xarray.Dataset
 
@@ -134,9 +121,7 @@ def read_idl(
         imgs.append(img)
         if measurement_variance:
             calibration_flags.append(int(imageinfo['calibration_flag'][0]))
-            airglow_scales.append(
-                np.asarray(imageinfo['airglow_scale'][0], dtype=float)
-            )
+            airglow_scales.append(np.asarray(imageinfo['airglow_scale'][0], dtype=float))
 
     imgs = xr.concat(imgs, dim='date')
     imgs = imgs.assign({'id':  imageinfo['inst_id'][0].strip().decode('utf8')})
@@ -145,12 +130,7 @@ def read_idl(
     # Reflattening is treated as a deterministic additive adjustment, so this
     # conditional detector variance is retained unchanged afterward.
     if measurement_variance:
-        imgs = _add_measurement_variance(
-            imgs,
-            calibration_flags,
-            airglow_scales,
-            poisson_offset,
-        )
+        imgs = _add_measurement_variance(imgs, calibration_flags, airglow_scales, poisson_offset)
 
     # Reapply WIC's flat field
     if (imgs['id']=='WIC')&reflat:
@@ -169,12 +149,7 @@ def read_idl(
     return imgs
 
 
-def _add_measurement_variance(
-    imgs,
-    calibration_flags,
-    airglow_scales,
-    poisson_offset,
-):
+def _add_measurement_variance(imgs, calibration_flags, airglow_scales, poisson_offset):
     """Attach conditional detector variance to calibrated IMAGE/FUV data."""
 
     sensor = str(imgs['id'].values)
@@ -182,97 +157,48 @@ def _add_measurement_variance(
     airglow_scales = np.asarray(airglow_scales)
 
     if np.any(airglow_scales != 0):
-        raise ValueError(
-            "Measurement variance is only implemented for IDL images "
-            "without FUVVIEW3 airglow subtraction"
-        )
+        raise ValueError("Measurement variance is only implemented for IDL images without FUVVIEW3 airglow subtraction")
 
     if sensor in ['SI12', 'SI13']:
         if np.any(calibration_flags != 1):
-            raise ValueError(
-                f"{sensor} measurement variance requires calibration flag 1"
-            )
+            raise ValueError(f"{sensor} measurement variance requires calibration flag 1")
     elif sensor == 'WIC':
         # Files can carry flag 3 because the separate CIMAGE field is
         # background-subtracted. IMAGE is treated as the flag-1-equivalent
         # corrected-AD field used by fuvpy.
         if np.any(~np.isin(calibration_flags, [1, 3])):
-            raise ValueError(
-                "WIC measurement variance requires calibration flag 1 or 3"
-            )
+            raise ValueError("WIC measurement variance requires calibration flag 1 or 3")
     else:
-        raise ValueError(
-            "Measurement variance is implemented for WIC, SI12, and SI13"
-        )
+        raise ValueError("Measurement variance is implemented for WIC, SI12, and SI13")
 
     multiplier = calibration_multiplier(imgs['date'].values, sensor)
     image = np.asarray(imgs['img'])
 
     if sensor in ['SI12', 'SI13']:
-        variance = si_measurement_variance(
-            image,
-            multiplier,
-            poisson_offset=poisson_offset,
-        )
-        variance_model = (
-            "SI Poisson counting variance: "
-            "a * img + poisson_offset * a^2"
-        )
+        variance = si_measurement_variance(image, multiplier, poisson_offset=poisson_offset)
+        variance_model = ("SI Poisson counting variance: a * img + poisson_offset * a^2")
         variance_units = "corrected count squared"
     else:
-        variance = wic_measurement_variance(
-            image,
-            poisson_offset=poisson_offset,
-        )
-        variance_model = (
-            "WIC reference compound-Poisson variance: "
-            "10.65 * img + poisson_offset * 10.65^2"
-        )
+        variance = wic_measurement_variance(image, poisson_offset=poisson_offset)
+        variance_model = ("WIC reference compound-Poisson variance: 10.65 * img + poisson_offset * 10.65^2")
         variance_units = "AD unit squared"
 
-    valid = (
-        np.isfinite(imgs['mlat'])
-        & np.isfinite(multiplier)
-        & (multiplier > 0)
-    )
+    valid = (np.isfinite(imgs['mlat']) & np.isfinite(multiplier) & (multiplier > 0))
     multiplier = np.where(valid, multiplier, np.nan)
     variance = np.where(valid, variance, np.nan)
 
-    imgs['calibration_multiplier'] = (
-        ['date', 'row', 'col'],
-        multiplier,
-    )
-    imgs['img_variance'] = (
-        ['date', 'row', 'col'],
-        variance,
-    )
+    imgs['calibration_multiplier'] = (['date', 'row', 'col'], multiplier)
+    imgs['img_variance'] = (['date', 'row', 'col'], variance)
     imgs['calibration_flag'] = (['date'], calibration_flags)
-    imgs['airglow_scale'] = (
-        ['date', 'airglow_parameter'],
-        airglow_scales,
-    )
-    imgs = imgs.assign_coords(
-        airglow_parameter=['multiplier', 'power', 'offset']
-    )
+    imgs['airglow_scale'] = (['date', 'airglow_parameter'], airglow_scales)
+    imgs = imgs.assign_coords(airglow_parameter=['multiplier', 'power', 'offset'])
 
-    imgs['calibration_multiplier'].attrs = {
-        'long_name': 'FUVVIEW3 mission correction times flat-field multiplier',
-        'units': '1',
-    }
+    imgs['calibration_multiplier'].attrs = {'long_name': 'FUVVIEW3 mission correction times flat-field multiplier', 'units': '1'}
     imgs['img_variance'].attrs = {
         'long_name': 'Conditional detector measurement variance of img',
         'units': variance_units,
         'model': variance_model,
-        'poisson_offset': float(poisson_offset),
-        'calculated_from': 'img before optional WIC reflattening',
-        'reflattening_assumption': (
-            'estimated reflattening background treated as deterministic'
-        ),
-        'excludes': (
-            'calibration uncertainty, background-model discrepancy, and '
-            'atmospheric-response uncertainty'
-        ),
-    }
+        'poisson_offset': float(poisson_offset)}
 
     return imgs
 
