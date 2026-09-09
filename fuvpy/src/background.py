@@ -11,7 +11,7 @@ import xarray as xr
 import time as timing
 
 from scipy.interpolate import BSpline
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, lsq_linear
 from scipy.stats import binned_statistic,binned_statistic_2d
 from scipy.sparse import csc_array
 from scipy.linalg import lstsq
@@ -21,6 +21,108 @@ from fuvpy.utils import sh
 from fuvpy.utils.sunlight import subsol
 
 import matplotlib.pyplot as plt
+
+
+def _monotonic_bs_transform(n_scp, n_tcp):
+    """Map free baselines and nonnegative increments to BS coefficients.
+
+    The existing coefficient vector is ordered with spatial basis outermost
+    and temporal basis innermost. Each temporal component receives one free
+    first spatial coefficient followed by cumulative spatial increments.
+    """
+
+    n_coefficients = n_scp * n_tcp
+    transform = np.zeros((n_coefficients, n_coefficients))
+
+    for temporal in range(n_tcp):
+        for spatial in range(n_scp):
+            row = spatial*n_tcp + temporal
+            for increment in range(spatial + 1):
+                column = increment*n_tcp + temporal
+                transform[row, column] = 1
+
+    return transform
+
+
+def _solve_monotonic_bs(
+    weighted_design,
+    weighted_data,
+    damping,
+    n_scp,
+    n_tcp,
+    solver,
+):
+    """Solve for spatially non-decreasing B-spline coefficients."""
+
+    transform = _monotonic_bs_transform(n_scp, n_tcp)
+    n_coefficients = transform.shape[0]
+
+    if solver == 'full':
+        # Reference calculation against every weighted image row.
+        design = weighted_design @ transform
+        data = weighted_data
+
+        damping_diagonal = np.diag(damping)
+        if np.any(damping_diagonal > 0):
+            regularization = np.sqrt(damping_diagonal)[:, None] * transform
+            design = np.vstack([design, regularization])
+            data = np.r_[data, np.zeros(n_coefficients)]
+    else:
+        # Operational calculation: reduce all pixels to the small normal
+        # system before applying the same coefficient bounds.
+        normal_matrix = weighted_design.T@weighted_design + damping
+        normal_data = weighted_design.T@weighted_data
+
+        normal_matrix = transform.T@normal_matrix@transform
+        normal_data = transform.T@normal_data
+
+        try:
+            lower_cholesky = np.linalg.cholesky(normal_matrix)
+            design = lower_cholesky.T
+            data = np.linalg.solve(lower_cholesky, normal_data)
+        except np.linalg.LinAlgError:
+            symmetric_matrix = (normal_matrix + normal_matrix.T)/2
+            eigenvalue, eigenvector = np.linalg.eigh(symmetric_matrix)
+            tolerance = (
+                np.max(np.abs(eigenvalue))
+                * n_coefficients
+                * np.finfo(float).eps
+            )
+            if np.min(eigenvalue) < -tolerance:
+                raise RuntimeError(
+                    "Monotonic normal matrix is not positive semidefinite"
+                )
+
+            eigenvalue = np.clip(eigenvalue, 0, None)
+            design = np.sqrt(eigenvalue)[:, None] * eigenvector.T
+            data = np.linalg.lstsq(
+                design.T,
+                normal_data,
+                rcond=None,
+            )[0]
+
+    lower = np.zeros(n_coefficients)
+    lower[:n_tcp] = -np.inf
+
+    try:
+        result = lsq_linear(
+            design,
+            data,
+            bounds=(lower, np.inf),
+            method='bvls',
+            max_iter=1000,
+        )
+    except Exception as error:
+        raise RuntimeError(
+            f"Monotonic B-spline solver failed: {error}"
+        ) from error
+    if not result.success:
+        raise RuntimeError(
+            "Monotonic B-spline fit failed "
+            f"(optimality={result.optimality:.3g}): {result.message}"
+        )
+
+    return transform @ result.x
 
 def backgroundmodel_BS(imgs,**kwargs):
     '''
@@ -72,6 +174,14 @@ def backgroundmodel_BS(imgs,**kwargs):
         `1/sqrt(imgs[input_variance])`. Default is False. With nonzero damping,
         reassess `dampingVal` because absolute measurement weights change the
         balance between the data and regularization.
+    monotonic : bool, optional
+        If True, constrain the fitted background to be non-decreasing with
+        the legacy coordinate `cos(SZA)/cos(DZA)`. The temporal spline remains
+        unchanged. Default is False.
+    monotonic_solver : {'normal', 'full'}, optional
+        `normal` first reduces the weighted image rows to a small normal
+        system and is the operational default. `full` applies the same bounds
+        to all weighted rows as a reference calculation.
     inplace : bool, optional
         If True, update the Dataset in place. Default is False (return a new Dataset).
 
@@ -102,6 +212,8 @@ def backgroundmodel_BS(imgs,**kwargs):
     dgsigma_freeze_iteration = kwargs.pop('dgsigma_freeze_iteration') if 'dgsigma_freeze_iteration' in kwargs.keys() else 1
     input_variance = kwargs.pop('input_variance') if 'input_variance' in kwargs.keys() else None
     variance_weighted = bool(kwargs.pop('variance_weighted')) if 'variance_weighted' in kwargs.keys() else False
+    monotonic = bool(kwargs.pop('monotonic')) if 'monotonic' in kwargs.keys() else False
+    monotonic_solver = kwargs.pop('monotonic_solver') if 'monotonic_solver' in kwargs.keys() else 'normal'
     inplace = bool(kwargs.pop('inplace')) if 'inplace' in kwargs.keys() else False
 
     if noise_model not in ['legacy', 'binned']:
@@ -118,6 +230,8 @@ def backgroundmodel_BS(imgs,**kwargs):
         raise ValueError(
             "dgsigma_freeze_iteration must be a non-negative integer"
         )
+    if monotonic_solver not in ['normal', 'full']:
+        raise ValueError("monotonic_solver must be 'normal' or 'full'")
 
     if not inplace: imgs = imgs.copy(deep=True)
 
@@ -135,6 +249,10 @@ def backgroundmodel_BS(imgs,**kwargs):
             raise ValueError(
                 "bin_population spatial weighting requires the legacy FUV "
                 "coordinate"
+            )
+        if monotonic:
+            raise ValueError(
+                "monotonic fitting requires the legacy FUV coordinate"
             )
     sKnots = np.r_[np.repeat(sKnots[0],sOrder),sKnots, np.repeat(sKnots[-1],sOrder)]
 
@@ -242,11 +360,21 @@ def backgroundmodel_BS(imgs,**kwargs):
         fit_w = w[ind] * ws[ind] * measurement_w[ind]
         weighted_design = G_s[ind, :] * fit_w[:, None]
         weighted_data = d_s[ind] * fit_w
-        m_s = lstsq(
-            weighted_design.T@weighted_design + R,
-            weighted_design.T@weighted_data,
-            lapack_driver='gelsy',
-        )[0]
+        if monotonic:
+            m_s = _solve_monotonic_bs(
+                weighted_design,
+                weighted_data,
+                R,
+                n_scp,
+                n_tcp,
+                monotonic_solver,
+            )
+        else:
+            m_s = lstsq(
+                weighted_design.T@weighted_design + R,
+                weighted_design.T@weighted_data,
+                lapack_driver='gelsy',
+            )[0]
         mNew    = M@m_s.reshape((n_scp, n_tcp)).T
         dm=[]
         for i, tt in enumerate(time):

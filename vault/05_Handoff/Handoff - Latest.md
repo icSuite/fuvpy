@@ -1,8 +1,8 @@
 # Handoff - Latest
 
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 Branch: `background_model_revision`
-Checkpoint: Steps 1 through 5 complete
+Checkpoint: Steps 1 through 6 complete
 
 ## Completed
 
@@ -62,29 +62,41 @@ Absolute measurement precision changes the balance between data and the
 existing regularization term. Any nonzero `dampingVal` therefore requires a
 new scale assessment rather than assuming its released tuning transfers.
 
+The optional monotonic BS fit uses a free first spatial coefficient plus
+nonnegative increments for every temporal basis component. This matches the
+existing spatial-outer, temporal-inner coefficient ordering and leaves the
+temporal B-spline unchanged. `monotonic_solver="normal"` first reduces the
+weighted image rows to the coefficient-sized normal system;
+`monotonic_solver="full"` is the full-row bounded reference. Both retain the
+same robust, spatial, and measurement row multipliers. The default remains the
+ordinary unconstrained solver, and failures raise `RuntimeError` explicitly.
+
 ## Verification
 
 `pytest -q tests/test_background_dgsigma.py
 tests/test_background_spatial_weighting.py
 tests/test_background_dgsigma_freeze.py
 tests/test_measurement_uncertainty.py
-tests/test_background_measurement_weighting.py` passes 35 tests. In addition to Steps
+tests/test_background_measurement_weighting.py
+tests/test_background_monotonic.py` passes 42 tests. In addition to Steps
 1--3, tests cover SI and WIC equations and offsets, representative mission and
 flat-field selection, dimensions, masks, metadata, rejected calibration
 states, pre-reflattening calculation, and unchanged default loader behavior.
 Step 5 tests confirm zero-damping equivalence for constant variance, reduced
 influence of a high-variance observation, separation from dgsigma estimation,
 and rejection of invalid fitted variance.
+Step 6 tests cover coefficient ordering, monotonic legacy-coordinate profiles,
+normal/full equivalence with combined row weights and damping, unchanged
+ordinary behavior, and explicit solver failures.
 
 ## Next action
 
-Implement Step 6 from `vault/02_Algorithm/Background Model Revision
-Implementation Plan.md` in a separate commit. Do not add experimental
-geometry, uncertainty, diagnostics, generated figures, or unrelated
-abstractions.
+Proceed to Step 7 combined validation from `vault/02_Algorithm/Background
+Model Revision Implementation Plan.md`. Do not change package defaults before
+the comparison is accepted.
 
 ## Portfolio impact
 
-The clean background-model revision has completed its first five scientific
-changes. This is an implementation checkpoint only; package defaults and
-downstream production guidance are unchanged pending combined validation.
+The clean background-model revision has completed Steps 1 through 6. Package
+defaults and downstream production guidance remain unchanged pending combined
+validation.

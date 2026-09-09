@@ -44,6 +44,13 @@ for Tukey robust weighting. If ``dampingVal`` is nonzero, its scale must be
 reassessed because absolute measurement weights change the balance between
 the data and regularization.
 
+``backgroundmodel_BS(..., monotonic=True)`` optionally constrains each
+temporal component's spatial B-spline coefficients to be non-decreasing with
+the existing ``cos(SZA)/cos(DZA)`` coordinate. The default ``monotonic=False``
+keeps the released solver. ``monotonic_solver="normal"`` is the low-cost
+operational solver; ``"full"`` retains all weighted image rows as a reference
+calculation.
+
 
 Dependencies
 ============

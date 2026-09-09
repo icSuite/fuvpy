@@ -1,8 +1,8 @@
 # Current State
 
-Last reviewed: 2026-09-08
+Last reviewed: 2026-09-09
 Branch: `background_model_revision`
-Implementation status: Steps 1 through 5 complete
+Implementation status: Steps 1 through 6 complete
 
 ## Confirmed implementation
 
@@ -49,20 +49,30 @@ Implementation status: Steps 1 through 5 complete
   pixel. Nonzero damping must be reassessed because absolute measurement
   weights alter the data-to-regularization balance. The released unweighted
   fit remains the default.
+- `backgroundmodel_BS(..., monotonic=True)` optionally represents each
+  temporal component's spatial coefficients as a free baseline followed by
+  nonnegative increments. The temporal spline, legacy coordinate, IRLS, and
+  all row multipliers are unchanged.
+- `monotonic_solver="normal"` reduces the weighted pixels to the small normal
+  system before bounded fitting and is the operational default. `"full"`
+  solves the equivalent bounded problem from all weighted rows as a reference.
+  The ordinary released solver remains the default with `monotonic=False`.
 
 ## Verification
 
-The focused tests through Step 5 pass 35 tests. They cover the
+The focused tests through Step 6 pass 42 tests. They cover the
 dgsigma bin structure, known variance relation, and population invariance,
 plus equal within-bin weights, equal bin influence, frame independence, and
 excluded/empty-bin behavior, the legacy-coordinate scope, iteration-0 scale
 retention, the released iteration-1 default, detector variance formulas,
 calibration-table selection, loader opt-in behavior, masks and metadata, and
 unsupported calibration states, plus constant-variance equivalence, reduced
-high-variance influence, dgsigma separation, and invalid fit variance.
+high-variance influence, dgsigma separation, invalid fit variance, monotonic
+coefficient ordering and profiles, normal/full equivalence, preserved ordinary
+behavior, and explicit bounded-solver failure.
 
 ## Current boundary and next action
 
-No geometry, background covariance, diagnostics, or monotonic-solver changes
-are present on this branch. The next planned change is Step 6, adding the
-optional monotonic spatial solver, as a separate commit.
+No geometry variants, background covariance, diagnostics, or generated
+figures are present on this branch. The next planned action is Step 7 combined
+validation; package defaults remain unchanged pending acceptance.
