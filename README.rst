@@ -56,7 +56,8 @@ adds scalar ``dgfit_iterations`` and ``dgfit_converged`` outputs. They are
 absent by default. Complete-orbit WIC comparisons must use an
 ``img_variance`` saved from ``read_idl(..., measurement_variance=True)``;
 variance cannot be reconstructed correctly from an already reflattened WIC
-``img`` field.
+``img`` field. The comparison script verifies the stored ``poisson_offset``
+and WIC pre-reflattening provenance attributes before using that variance.
 
 
 Dependencies

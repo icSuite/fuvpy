@@ -106,7 +106,11 @@ def _variance_dataset(sensor="WIC", include_variance=False):
             dataset["img"].dims,
             np.array([[[7.0, 8.0]], [[9.0, np.nan]]]),
         )
-        dataset["img_variance"].attrs["source"] = "pre-reflattening img"
+        dataset["img_variance"].attrs["poisson_offset"] = 0.5
+        if sensor == "WIC":
+            dataset["img_variance"].attrs["calculated_from"] = (
+                "img before optional WIC reflattening"
+            )
 
     return dataset
 
@@ -134,6 +138,35 @@ def test_invalid_stored_variance_on_fitted_support_is_rejected():
     dataset["img_variance"].values[0, 0, 0] = 0.0
 
     with pytest.raises(ValueError, match="strictly positive"):
+        validation._attach_measurement_variance(dataset, "WIC")
+
+
+@pytest.mark.parametrize("poisson_offset", [None, 0.0, np.nan])
+def test_stored_variance_requires_half_count_offset(poisson_offset):
+    dataset = _variance_dataset(include_variance=True)
+    if poisson_offset is None:
+        del dataset["img_variance"].attrs["poisson_offset"]
+    else:
+        dataset["img_variance"].attrs["poisson_offset"] = poisson_offset
+
+    with pytest.raises(ValueError, match="poisson_offset=0.5"):
+        validation._attach_measurement_variance(dataset, "WIC")
+
+
+@pytest.mark.parametrize(
+    "calculated_from",
+    [None, "img after optional WIC reflattening"],
+)
+def test_stored_wic_variance_requires_pre_reflattening_provenance(
+    calculated_from,
+):
+    dataset = _variance_dataset(include_variance=True)
+    if calculated_from is None:
+        del dataset["img_variance"].attrs["calculated_from"]
+    else:
+        dataset["img_variance"].attrs["calculated_from"] = calculated_from
+
+    with pytest.raises(ValueError, match="before optional WIC reflattening"):
         validation._attach_measurement_variance(dataset, "WIC")
 
 

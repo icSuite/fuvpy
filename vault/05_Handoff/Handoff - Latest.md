@@ -81,6 +81,10 @@ is rejected because the normally stored WIC image is already reflattened and
 cannot reproduce the loader's pre-reflattening calculation. A suitable WIC
 orbit must be loaded and saved with
 `read_idl(..., measurement_variance=True, poisson_offset=0.5)`.
+Stored validation variance must identify `poisson_offset=0.5`. WIC variance
+must also retain the loader attribute
+`calculated_from="img before optional WIC reflattening"`; otherwise the script
+rejects it rather than accepting variance with ambiguous provenance.
 
 The script writes representative figures showing `dgmodel`, `dgimg`,
 `dgsigma`, and `dgweight`, plus a CSV containing fit time, robust summary
@@ -99,7 +103,7 @@ tests/test_measurement_uncertainty.py
 tests/test_background_measurement_weighting.py
 tests/test_background_monotonic.py
 tests/test_background_revision_validation.py
-tests/test_background_diagnostics.py` passes 52 tests. In addition to Steps
+tests/test_background_diagnostics.py` passes 57 tests. In addition to Steps
 1--3, tests cover SI and WIC equations and offsets, representative mission and
 flat-field selection, dimensions, masks, metadata, rejected calibration
 states, pre-reflattening calculation, and unchanged default loader behavior.
@@ -111,10 +115,11 @@ normal/full equivalence with combined row weights and damping, unchanged
 ordinary behavior, and explicit solver failures.
 The script tests cover the exact cumulative variant sequence, representative
 frames, shared robust limits, stored WIC variance preservation, explicit WIC
-rejection when variance is absent or invalid, SI attachment, and required CLI
-arguments. Diagnostics tests cover default absence and opt-in scalar converged
-values. `python examples/scripts/validate_background_revision.py --help` also
-passes. No orbit model comparison was run.
+rejection when variance is absent, invalid, or lacks the required offset and
+pre-reflattening provenance, SI attachment, and required CLI arguments.
+Diagnostics tests cover default absence and opt-in scalar converged values.
+`python examples/scripts/validate_background_revision.py --help` also passes.
+No orbit model comparison was run.
 
 ## Next action
 

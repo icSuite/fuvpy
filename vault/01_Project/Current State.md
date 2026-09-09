@@ -67,13 +67,15 @@ Validation status: combined complete-orbit script ready; execution blocked
   SI variance can be reconstructed when absent because SI is not reflattened.
   WIC variance cannot be reconstructed from the normally reflattened NetCDF
   image; WIC input without stored pre-reflattening `img_variance` is rejected
-  with instructions to generate it through `read_idl`.
+  with instructions to generate it through `read_idl`. Stored validation
+  variance must identify `poisson_offset=0.5`; WIC must additionally carry the
+  loader's `calculated_from="img before optional WIC reflattening"` provenance.
 - `backgroundmodel_BS(..., diagnostics=True)` adds only the scalar
   `dgfit_iterations` and `dgfit_converged` fields. They are absent by default.
 
 ## Verification
 
-The focused implementation and script-helper tests pass 52 tests. They cover the
+The focused implementation and script-helper tests pass 57 tests. They cover the
 dgsigma bin structure, known variance relation, and population invariance,
 plus equal within-bin weights, equal bin influence, frame independence, and
 excluded/empty-bin behavior, the legacy-coordinate scope, iteration-0 scale
@@ -84,8 +86,8 @@ high-variance influence, dgsigma separation, invalid fit variance, monotonic
 coefficient ordering and profiles, normal/full equivalence, preserved ordinary
 behavior, explicit bounded-solver failure, cumulative variant construction,
 frame selection, plotting scales, stored WIC variance preservation and
-rejection when absent, SI variance attachment, and opt-in scalar convergence
-diagnostics. CLI help passes.
+rejection when absent or untraceable, SI variance attachment, and opt-in
+scalar convergence diagnostics. CLI help passes.
 
 ## Current boundary and next action
 

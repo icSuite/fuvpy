@@ -148,6 +148,25 @@ def _attach_measurement_variance(dataset, sensor):
         if variance.shape != dataset["img"].shape:
             raise ValueError("Stored img_variance must match the img shape")
 
+        try:
+            poisson_offset = float(variance.attrs["poisson_offset"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError(
+                "Stored img_variance must identify poisson_offset=0.5"
+            ) from None
+        if not np.isfinite(poisson_offset) or poisson_offset != 0.5:
+            raise ValueError(
+                "Stored img_variance must identify poisson_offset=0.5"
+            )
+
+        if sensor == "WIC":
+            calculated_from = variance.attrs.get("calculated_from")
+            if calculated_from != "img before optional WIC reflattening":
+                raise ValueError(
+                    "Stored WIC img_variance must identify calculated_from="
+                    "'img before optional WIC reflattening'"
+                )
+
         fraction = (
             np.cos(np.deg2rad(dataset["sza"]))
             / np.cos(np.deg2rad(dataset["dza"]))
