@@ -3,6 +3,7 @@
 Last reviewed: 2026-09-09
 Branch: `background_model_revision`
 Implementation status: Steps 1 through 6 complete
+Validation status: combined complete-orbit script ready; execution blocked
 
 ## Confirmed implementation
 
@@ -57,10 +58,15 @@ Implementation status: Steps 1 through 6 complete
   system before bounded fitting and is the operational default. `"full"`
   solves the equivalent bounded problem from all weighted rows as a reference.
   The ordinary released solver remains the default with `monotonic=False`.
+- `examples/scripts/validate_background_revision.py` accepts explicit native
+  WIC, SI12, and SI13 orbit NetCDF files and runs the six cumulative Step 7
+  variants. It writes representative four-field comparison figures and a CSV
+  of fit time and robust summary metrics. It is a comparison tool, not a
+  validation result.
 
 ## Verification
 
-The focused tests through Step 6 pass 42 tests. They cover the
+The focused implementation and script-helper tests pass 47 tests. They cover the
 dgsigma bin structure, known variance relation, and population invariance,
 plus equal within-bin weights, equal bin influence, frame independence, and
 excluded/empty-bin behavior, the legacy-coordinate scope, iteration-0 scale
@@ -69,10 +75,13 @@ calibration-table selection, loader opt-in behavior, masks and metadata, and
 unsupported calibration states, plus constant-variance equivalence, reduced
 high-variance influence, dgsigma separation, invalid fit variance, monotonic
 coefficient ordering and profiles, normal/full equivalence, preserved ordinary
-behavior, and explicit bounded-solver failure.
+behavior, explicit bounded-solver failure, cumulative variant construction,
+frame selection, plotting scales, and variance attachment. CLI help passes.
 
 ## Current boundary and next action
 
 No geometry variants, background covariance, diagnostics, or generated
-figures are present on this branch. The next planned action is Step 7 combined
-validation; package defaults remain unchanged pending acceptance.
+figures are present on this branch. Complete-orbit execution is blocked because
+`/home/bing/dtu_server` is not mounted, and the available icBuilder example
+IDL files are partial sequences. Package defaults remain unchanged pending
+complete-orbit validation.

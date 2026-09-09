@@ -3,6 +3,7 @@
 Last updated: 2026-09-09
 Branch: `background_model_revision`
 Checkpoint: Steps 1 through 6 complete
+Validation: script prepared; complete-orbit execution pending
 
 ## Completed
 
@@ -71,6 +72,14 @@ weighted image rows to the coefficient-sized normal system;
 same robust, spatial, and measurement row multipliers. The default remains the
 ordinary unconstrained solver, and failures raise `RuntimeError` explicitly.
 
+`examples/scripts/validate_background_revision.py` is a concise Step 7
+comparison tool. It requires explicit complete native-grid WIC, SI12, and SI13
+orbit NetCDF paths, attaches the Step 4 variance with `poisson_offset=0.5`, and
+runs the six cumulative variants from released through monotonic. It writes a
+few representative figures showing `dgmodel`, `dgimg`, `dgsigma`, and
+`dgweight`, plus a CSV containing fit time and robust summary metrics. It does
+not run the SH model or change package defaults.
+
 ## Verification
 
 `pytest -q tests/test_background_dgsigma.py
@@ -78,7 +87,8 @@ tests/test_background_spatial_weighting.py
 tests/test_background_dgsigma_freeze.py
 tests/test_measurement_uncertainty.py
 tests/test_background_measurement_weighting.py
-tests/test_background_monotonic.py` passes 42 tests. In addition to Steps
+tests/test_background_monotonic.py
+tests/test_background_revision_validation.py` passes 47 tests. In addition to Steps
 1--3, tests cover SI and WIC equations and offsets, representative mission and
 flat-field selection, dimensions, masks, metadata, rejected calibration
 states, pre-reflattening calculation, and unchanged default loader behavior.
@@ -88,15 +98,30 @@ and rejection of invalid fitted variance.
 Step 6 tests cover coefficient ordering, monotonic legacy-coordinate profiles,
 normal/full equivalence with combined row weights and damping, unchanged
 ordinary behavior, and explicit solver failures.
+The script tests cover the exact cumulative variant sequence, representative
+frames, shared robust limits, WIC variance attachment, and required CLI
+arguments. `python examples/scripts/validate_background_revision.py --help`
+also passes. No orbit model comparison was run.
 
 ## Next action
 
-Proceed to Step 7 combined validation from `vault/02_Algorithm/Background
-Model Revision Implementation Plan.md`. Do not change package defaults before
-the comparison is accepted.
+Mount the complete native-grid orbit data, then run the script with explicit
+paths, for example:
+
+```bash
+python examples/scripts/validate_background_revision.py \
+  --wic /path/to/complete_wic_orbit.nc \
+  --si12 /path/to/complete_si12_orbit.nc \
+  --si13 /path/to/complete_si13_orbit.nc \
+  --output-dir /tmp/fuvpy_background_revision_validation
+```
+
+Do not use the partial icBuilder example IDLs for scientific validation and do
+not change package defaults before the complete-orbit comparison is accepted.
 
 ## Portfolio impact
 
-The clean background-model revision has completed Steps 1 through 6. Package
-defaults and downstream production guidance remain unchanged pending combined
-validation.
+The clean background-model revision has completed Steps 1 through 6 and has a
+reusable combined-validation script. Scientific validation remains pending
+because `/home/bing/dtu_server` is not mounted; package defaults and downstream
+production guidance are unchanged.
