@@ -5,23 +5,19 @@ Created on Fri Sep 30 09:28:25 2022
 
 @author: aohma
 """
+import warnings
 
 import numpy as np
 import xarray as xr
-import time as timing
 
 from scipy.interpolate import BSpline
 from scipy.optimize import curve_fit, lsq_linear
-from scipy.stats import binned_statistic,binned_statistic_2d
-from scipy.sparse import csc_array
+from scipy.stats import binned_statistic
 from scipy.linalg import lstsq
 
 from polplot import sdarngrid,bin_number
 from fuvpy.utils import sh
 from fuvpy.utils.sunlight import subsol
-
-import matplotlib.pyplot as plt
-
 
 def _monotonic_bs_transform(n_scp, n_tcp):
     """Map free baselines and nonnegative increments to BS coefficients.
@@ -44,15 +40,13 @@ def _monotonic_bs_transform(n_scp, n_tcp):
     return transform
 
 
-def _solve_monotonic_bs(
-    weighted_design,
-    weighted_data,
-    damping,
-    n_scp,
-    n_tcp,
-    solver,
-):
-    """Solve for spatially non-decreasing B-spline coefficients."""
+def _solve_monotonic_bs(weighted_design, weighted_data, damping, n_scp, n_tcp, solver):
+    """Solve for spatially non-decreasing B-spline coefficients.
+
+    BVLS is allowed at most 1000 iterations. SciPy's ``result.success`` is the
+    convergence criterion; reaching the iteration limit is not interpreted
+    separately.
+    """
 
     transform = _monotonic_bs_transform(n_scp, n_tcp)
     n_coefficients = transform.shape[0]
@@ -83,44 +77,23 @@ def _solve_monotonic_bs(
         except np.linalg.LinAlgError:
             symmetric_matrix = (normal_matrix + normal_matrix.T)/2
             eigenvalue, eigenvector = np.linalg.eigh(symmetric_matrix)
-            tolerance = (
-                np.max(np.abs(eigenvalue))
-                * n_coefficients
-                * np.finfo(float).eps
-            )
+            tolerance = (np.max(np.abs(eigenvalue)) * n_coefficients * np.finfo(float).eps)
             if np.min(eigenvalue) < -tolerance:
-                raise RuntimeError(
-                    "Monotonic normal matrix is not positive semidefinite"
-                )
+                raise RuntimeError("Monotonic normal matrix is not positive semidefinite")
 
             eigenvalue = np.clip(eigenvalue, 0, None)
             design = np.sqrt(eigenvalue)[:, None] * eigenvector.T
-            data = np.linalg.lstsq(
-                design.T,
-                normal_data,
-                rcond=None,
-            )[0]
+            data = np.linalg.lstsq(design.T, normal_data, rcond=None)[0]
 
     lower = np.zeros(n_coefficients)
     lower[:n_tcp] = -np.inf
 
     try:
-        result = lsq_linear(
-            design,
-            data,
-            bounds=(lower, np.inf),
-            method='bvls',
-            max_iter=1000,
-        )
+        result = lsq_linear(design, data, bounds=(lower, np.inf), method='bvls', max_iter=1000)
     except Exception as error:
-        raise RuntimeError(
-            f"Monotonic B-spline solver failed: {error}"
-        ) from error
+        raise RuntimeError(f"Monotonic B-spline solver failed: {error}") from error
     if not result.success:
-        raise RuntimeError(
-            "Monotonic B-spline fit failed "
-            f"(optimality={result.optimality:.3g}): {result.message}"
-        )
+        raise RuntimeError(f"Monotonic B-spline fit failed (optimality={result.optimality:.3g}): {result.message}")
 
     return transform @ result.x
 
@@ -182,6 +155,10 @@ def backgroundmodel_BS(imgs,**kwargs):
         `normal` first reduces the weighted image rows to a small normal
         system and is the operational default. `full` applies the same bounds
         to all weighted rows as a reference calculation.
+    monotonic_fallback : bool, optional
+        If True, a failed monotonic solve emits a warning and uses the ordinary
+        solver for that IRLS iteration and all remaining iterations. Default
+        is False, so monotonic solver failures remain explicit.
     diagnostics : bool, optional
         If True, add scalar `dgfit_iterations` and `dgfit_converged` fields.
         Default is False.
@@ -199,6 +176,7 @@ def backgroundmodel_BS(imgs,**kwargs):
             - imgs['dgsigma'] is the modelled spread
             - imgs['dgnorm_residual'] is the residual norm
             - imgs['dgnorm_model'] is the model norm
+            - imgs['dgsolver_flag'] is the scalar spatial-solver outcome code
     '''
 
     # Set keyword arguments to input or default values    
@@ -217,23 +195,19 @@ def backgroundmodel_BS(imgs,**kwargs):
     variance_weighted = bool(kwargs.pop('variance_weighted')) if 'variance_weighted' in kwargs.keys() else False
     monotonic = bool(kwargs.pop('monotonic')) if 'monotonic' in kwargs.keys() else False
     monotonic_solver = kwargs.pop('monotonic_solver') if 'monotonic_solver' in kwargs.keys() else 'normal'
+    monotonic_fallback = bool(kwargs.pop('monotonic_fallback')) if 'monotonic_fallback' in kwargs.keys() else False
     diagnostics = bool(kwargs.pop('diagnostics')) if 'diagnostics' in kwargs.keys() else False
     inplace = bool(kwargs.pop('inplace')) if 'inplace' in kwargs.keys() else False
 
     if noise_model not in ['legacy', 'binned']:
         raise ValueError("noise_model must be 'legacy' or 'binned'")
+
     if spatial_weighting not in ['gaussian', 'bin_population']:
-        raise ValueError(
-            "spatial_weighting must be 'gaussian' or 'bin_population'"
-        )
-    if (
-        isinstance(dgsigma_freeze_iteration, (bool, np.bool_))
-        or not isinstance(dgsigma_freeze_iteration, (int, np.integer))
-        or dgsigma_freeze_iteration < 0
-    ):
-        raise ValueError(
-            "dgsigma_freeze_iteration must be a non-negative integer"
-        )
+        raise ValueError("spatial_weighting must be 'gaussian' or 'bin_population'")
+
+    if (isinstance(dgsigma_freeze_iteration, (bool, np.bool_)) or not isinstance(dgsigma_freeze_iteration, (int, np.integer)) or dgsigma_freeze_iteration < 0):
+        raise ValueError("dgsigma_freeze_iteration must be a non-negative integer")
+
     if monotonic_solver not in ['normal', 'full']:
         raise ValueError("monotonic_solver must be 'normal' or 'full'")
 
@@ -250,14 +224,9 @@ def backgroundmodel_BS(imgs,**kwargs):
         fraction = np.cos(np.deg2rad(imgs['sza'].stack(z=('row','col')).values))
         if sKnots is None: sKnots= [-1,-0.1,0,0.1,0.4,1]
         if spatial_weighting == 'bin_population':
-            raise ValueError(
-                "bin_population spatial weighting requires the legacy FUV "
-                "coordinate"
-            )
+            raise ValueError("bin_population spatial weighting requires the legacy FUV coordinate")
         if monotonic:
-            raise ValueError(
-                "monotonic fitting requires the legacy FUV coordinate"
-            )
+            raise ValueError("monotonic fitting requires the legacy FUV coordinate")
     sKnots = np.r_[np.repeat(sKnots[0],sOrder),sKnots, np.repeat(sKnots[-1],sOrder)]
 
     # Minuets since first image
@@ -317,36 +286,21 @@ def backgroundmodel_BS(imgs,**kwargs):
     measurement_w = np.ones_like(d_s)
     if variance_weighted:
         if not isinstance(input_variance, str):
-            raise ValueError(
-                "input_variance must name a Dataset variable when "
-                "variance_weighted=True"
-            )
+            raise ValueError("input_variance must name a Dataset variable when variance_weighted=True")
         if input_variance not in imgs:
-            raise ValueError(
-                f"Input variance variable '{input_variance}' is not in imgs"
-            )
+            raise ValueError(f"Input variance variable '{input_variance}' is not in imgs")
 
         try:
-            measurement_variance = (
-                imgs[input_variance]
-                .transpose('date', 'row', 'col')
-                .stack(z=('row', 'col'))
-                .values
-                .flatten()
-            )
+            measurement_variance = imgs[input_variance].transpose('date', 'row', 'col').stack(z=('row', 'col')).values.flatten()
         except ValueError:
-            raise ValueError(
-                "Input variance must have date, row, and col dimensions"
-            )
+            raise ValueError("Input variance must have date, row, and col dimensions")
 
         if measurement_variance.shape != d_s.shape:
             raise ValueError("Input variance must have the same shape as the image")
         if np.any(~np.isfinite(measurement_variance[ind])):
             raise ValueError("Input variance must be finite at fitted pixels")
         if np.any(measurement_variance[ind] <= 0):
-            raise ValueError(
-                "Input variance must be strictly positive at fitted pixels"
-            )
+            raise ValueError("Input variance must be strictly positive at fitted pixels")
 
         measurement_w[ind] = 1/np.sqrt(measurement_variance[ind])
 
@@ -358,27 +312,25 @@ def backgroundmodel_BS(imgs,**kwargs):
     diff = 1e10
     iteration = 0
     m = None
+    use_monotonic = monotonic
+    solver_flag = 1 if monotonic else 0
     while (diff>stop)&(iteration < 100):
         # Keep robust, spatial-sampling, and measurement-precision roles
         # visible before forming the weighted least-squares system.
         fit_w = w[ind] * ws[ind] * measurement_w[ind]
         weighted_design = G_s[ind, :] * fit_w[:, None]
         weighted_data = d_s[ind] * fit_w
-        if monotonic:
-            m_s = _solve_monotonic_bs(
-                weighted_design,
-                weighted_data,
-                R,
-                n_scp,
-                n_tcp,
-                monotonic_solver,
-            )
-        else:
-            m_s = lstsq(
-                weighted_design.T@weighted_design + R,
-                weighted_design.T@weighted_data,
-                lapack_driver='gelsy',
-            )[0]
+        if use_monotonic:
+            try:
+                m_s = _solve_monotonic_bs(weighted_design, weighted_data, R, n_scp, n_tcp, monotonic_solver)
+            except RuntimeError as error:
+                if not monotonic_fallback:
+                    raise
+                warnings.warn(f"Monotonic B-spline solve failed; using the ordinary solver for this and all remaining IRLS iterations: {error}", RuntimeWarning, stacklevel=2)
+                use_monotonic = False
+                solver_flag = 2
+        if not use_monotonic:
+            m_s = lstsq(weighted_design.T@weighted_design + R, weighted_design.T@weighted_data, lapack_driver='gelsy')[0]
         mNew    = M@m_s.reshape((n_scp, n_tcp)).T
         dm=[]
         for i, tt in enumerate(time):
@@ -390,15 +342,9 @@ def backgroundmodel_BS(imgs,**kwargs):
         if iteration <= dgsigma_freeze_iteration:
             sigma = np.full_like(d_s,np.nan)
             if noise_model == 'legacy':
-                sigma[ind] = _noisemodel(
-                    fraction.flatten()[ind], d_s[ind], dm.flatten()[ind],
-                    w[ind]*ws[ind], sKnots,
-                )
+                sigma[ind] = _noisemodel(fraction.flatten()[ind], d_s[ind], dm.flatten()[ind], w[ind]*ws[ind], sKnots)
             else:
-                sigma[ind] = _noisemodel_binned(
-                    fraction.flatten()[ind], d_s[ind], dm.flatten()[ind],
-                    w[ind]*ws[ind], sKnots,
-                )
+                sigma[ind] = _noisemodel_binned(fraction.flatten()[ind], d_s[ind], dm.flatten()[ind], w[ind]*ws[ind], sKnots)
         w[ind] = (1 - np.minimum(1,(residuals/(tukeyVal*sigma[ind]))**2))**2
 
         if m is not None: diff = np.sqrt(np.mean((mNew-m)**2))/(1+np.sqrt(np.mean(mNew**2)))
@@ -417,11 +363,10 @@ def backgroundmodel_BS(imgs,**kwargs):
     imgs['dgsigma'] = (['date','row','col'],(sigma).reshape((n_t,len(imgs.row),len(imgs.col))))
     imgs['dgnorm_residual'] = normR
     imgs['dgnorm_model'] = normM
+    imgs['dgsolver_flag'] = solver_flag
     if diagnostics:
         imgs['dgfit_iterations'] = iteration
-        imgs['dgfit_converged'] = (
-            iteration < 100 and np.isfinite(diff) and diff <= stop
-        )
+        imgs['dgfit_converged'] = iteration < 100 and np.isfinite(diff) and diff <= stop
 
     # Remove pixels outside model scope
     ind = (imgs.sza>=0)
@@ -437,13 +382,14 @@ def backgroundmodel_BS(imgs,**kwargs):
     imgs['dgsigma'].attrs = {'long_name': 'BS model spread'}
     imgs['dgnorm_residual'].attrs = {'long_name': 'BS model residual norm'}
     imgs['dgnorm_model'].attrs = {'long_name': 'BS model solution norm'}
+    imgs['dgsolver_flag'].attrs = {
+        'long_name': 'BS spatial solver outcome',
+        'flag_values': np.array([0, 1, 2], dtype=np.int8),
+        'flag_meanings': 'standard_requested monotonic_succeeded monotonic_failed_standard_fallback'
+    }
     if diagnostics:
-        imgs['dgfit_iterations'].attrs = {
-            'long_name': 'Number of BS IRLS iterations'
-        }
-        imgs['dgfit_converged'].attrs = {
-            'long_name': 'BS IRLS convergence status'
-        }
+        imgs['dgfit_iterations'].attrs = {'long_name': 'Number of BS IRLS iterations'}
+        imgs['dgfit_converged'].attrs = {'long_name': 'BS IRLS convergence status'}
     # Return the new DataSet if not inplace 
     if not inplace:
         return imgs
@@ -493,19 +439,12 @@ def _bin_population_weights(fraction, valid, bins):
         if frame_fraction.size == 0:
             continue
 
-        count, _, bin_index = binned_statistic(
-            frame_fraction,
-            frame_fraction,
-            statistic='count',
-            bins=bins,
-        )
+        count, _, bin_index = binned_statistic(frame_fraction, frame_fraction, statistic='count', bins=bins)
 
         populated_bins = np.count_nonzero(count)
         bin_count = count[bin_index - 1]
         normalization = frame_fraction.size / populated_bins
-        weights[frame, valid[frame]] = np.sqrt(
-            normalization / bin_count
-        )
+        weights[frame, valid[frame]] = np.sqrt(normalization / bin_count)
 
     return weights
 
@@ -525,9 +464,7 @@ def _binned_noise_statistics(fraction, d, dm, w, sKnots):
             continue
 
         model_squared.append(np.average(dm[in_bin]**2, weights=w[in_bin]))
-        residual_squared.append(
-            np.average((d[in_bin] - dm[in_bin])**2, weights=w[in_bin])
-        )
+        residual_squared.append(np.average((d[in_bin] - dm[in_bin])**2, weights=w[in_bin]))
 
     return np.asarray(model_squared), np.asarray(residual_squared)
 
@@ -535,9 +472,7 @@ def _binned_noise_statistics(fraction, d, dm, w, sKnots):
 def _noisemodel_binned(fraction, d, dm, w, sKnots):
     """Estimate residual spread without repeating bin statistics per pixel."""
 
-    model_squared, residual_squared = _binned_noise_statistics(
-        fraction, d, dm, w, sKnots,
-    )
+    model_squared, residual_squared = _binned_noise_statistics(fraction, d, dm, w, sKnots)
 
     if model_squared.size < 2:
         raise ValueError("At least two populated geometry bins are required")
@@ -545,12 +480,7 @@ def _noisemodel_binned(fraction, d, dm, w, sKnots):
     def func(x, a, b):
         return a*x+b
 
-    coefficients, _ = curve_fit(
-        func,
-        model_squared,
-        residual_squared,
-        bounds=(0, np.inf),
-    )
+    coefficients, _ = curve_fit(func, model_squared, residual_squared, bounds=(0, np.inf))
 
     return np.sqrt(func(dm**2, *coefficients))
 

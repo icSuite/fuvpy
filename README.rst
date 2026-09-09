@@ -49,7 +49,14 @@ temporal component's spatial B-spline coefficients to be non-decreasing with
 the existing ``cos(SZA)/cos(DZA)`` coordinate. The default ``monotonic=False``
 keeps the released solver. ``monotonic_solver="normal"`` is the low-cost
 operational solver; ``"full"`` retains all weighted image rows as a reference
-calculation.
+calculation. A bounded solve is accepted only when SciPy reports
+``result.success``; ``max_iter`` remains fixed at 1000. By default a failure
+raises. ``monotonic_fallback=True`` instead warns and uses the ordinary solver
+for the failed IRLS iteration and all later iterations.
+
+Every BS result includes scalar ``dgsolver_flag``: 0 means the standard solver
+was requested, 1 means monotonic solving succeeded throughout, and 2 means a
+monotonic failure triggered the explicit standard-solver fallback.
 
 For concise fit monitoring, ``backgroundmodel_BS(..., diagnostics=True)``
 adds scalar ``dgfit_iterations`` and ``dgfit_converged`` outputs. They are

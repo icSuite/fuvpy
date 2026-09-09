@@ -19,16 +19,13 @@ import numpy as np
 import xarray as xr
 
 from fuvpy.src.background import backgroundmodel_BS
-from fuvpy.src.measurement_uncertainty import (
-    calibration_multiplier,
-    si_measurement_variance,
-)
+from fuvpy.src.measurement_uncertainty import calibration_multiplier, si_measurement_variance
 
 
 DETECTOR_SHAPES = {
     "WIC": (256, 256),
     "SI12": (128, 128),
-    "SI13": (128, 128),
+    "SI13": (128, 128)
 }
 
 VARIANTS = [
@@ -38,16 +35,16 @@ VARIANTS = [
         "bin_population",
         {
             "noise_model": "binned",
-            "spatial_weighting": "bin_population",
-        },
+            "spatial_weighting": "bin_population"
+        }
     ),
     (
         "frozen_dgsigma",
         {
             "noise_model": "binned",
             "spatial_weighting": "bin_population",
-            "dgsigma_freeze_iteration": 0,
-        },
+            "dgsigma_freeze_iteration": 0
+        }
     ),
     (
         "measurement_weighted",
@@ -56,8 +53,8 @@ VARIANTS = [
             "spatial_weighting": "bin_population",
             "dgsigma_freeze_iteration": 0,
             "input_variance": "img_variance",
-            "variance_weighted": True,
-        },
+            "variance_weighted": True
+        }
     ),
     (
         "monotonic",
@@ -69,15 +66,16 @@ VARIANTS = [
             "variance_weighted": True,
             "monotonic": True,
             "monotonic_solver": "normal",
-        },
-    ),
+            "monotonic_fallback": False
+        }
+    )
 ]
 
 PLOT_FIELDS = [
     ("dgmodel", "viridis", False),
     ("dgimg", "RdBu_r", True),
     ("dgsigma", "magma", False),
-    ("dgweight", "viridis", False),
+    ("dgweight", "viridis", False)
 ]
 
 
@@ -102,33 +100,23 @@ def _load_native_orbit(path, expected_sensor):
     """Load and check one complete native detector-grid orbit dataset."""
 
     dataset = xr.load_dataset(path)
-    missing = [
-        name for name in ["img", "date", "sza", "dza", "id"]
-        if name not in dataset
-    ]
+    missing = [name for name in ["img", "date", "sza", "dza", "id"] if name not in dataset]
     if missing:
         raise ValueError(f"{path} is missing required fields: {missing}")
 
     sensor = _sensor_name(dataset)
     if sensor != expected_sensor:
-        raise ValueError(
-            f"Expected {expected_sensor} dataset at {path}, found {sensor}"
-        )
+        raise ValueError(f"Expected {expected_sensor} dataset at {path}, found {sensor}")
 
     required_dimensions = {"date", "row", "col"}
     for name in ["img", "sza", "dza"]:
         if set(dataset[name].dims) != required_dimensions:
-            raise ValueError(
-                f"{name} must have date, row, and col dimensions"
-            )
+            raise ValueError(f"{name} must have date, row, and col dimensions")
         dataset[name] = dataset[name].transpose("date", "row", "col")
 
     detector_shape = (dataset.sizes["row"], dataset.sizes["col"])
     if detector_shape != DETECTOR_SHAPES[sensor]:
-        raise ValueError(
-            f"{sensor} must use its full native detector grid "
-            f"{DETECTOR_SHAPES[sensor]}, found {detector_shape}"
-        )
+        raise ValueError(f"{sensor} must use its full native detector grid {DETECTOR_SHAPES[sensor]}, found {detector_shape}")
     if dataset.sizes["date"] < 2:
         raise ValueError("A complete orbit sequence must contain multiple frames")
 
@@ -141,9 +129,7 @@ def _attach_measurement_variance(dataset, sensor):
     if "img_variance" in dataset:
         variance = dataset["img_variance"]
         if set(variance.dims) != {"date", "row", "col"}:
-            raise ValueError(
-                "Stored img_variance must have date, row, and col dimensions"
-            )
+            raise ValueError("Stored img_variance must have date, row, and col dimensions")
         variance = variance.transpose("date", "row", "col")
         if variance.shape != dataset["img"].shape:
             raise ValueError("Stored img_variance must match the img shape")
@@ -151,26 +137,16 @@ def _attach_measurement_variance(dataset, sensor):
         try:
             poisson_offset = float(variance.attrs["poisson_offset"])
         except (KeyError, TypeError, ValueError):
-            raise ValueError(
-                "Stored img_variance must identify poisson_offset=0.5"
-            ) from None
+            raise ValueError("Stored img_variance must identify poisson_offset=0.5") from None
         if not np.isfinite(poisson_offset) or poisson_offset != 0.5:
-            raise ValueError(
-                "Stored img_variance must identify poisson_offset=0.5"
-            )
+            raise ValueError("Stored img_variance must identify poisson_offset=0.5")
 
         if sensor == "WIC":
             calculated_from = variance.attrs.get("calculated_from")
             if calculated_from != "img before optional WIC reflattening":
-                raise ValueError(
-                    "Stored WIC img_variance must identify calculated_from="
-                    "'img before optional WIC reflattening'"
-                )
+                raise ValueError("Stored WIC img_variance must identify calculated_from='img before optional WIC reflattening'")
 
-        fraction = (
-            np.cos(np.deg2rad(dataset["sza"]))
-            / np.cos(np.deg2rad(dataset["dza"]))
-        )
+        fraction = np.cos(np.deg2rad(dataset["sza"]))/np.cos(np.deg2rad(dataset["dza"]))
         fitted = (
             (dataset["sza"] >= 0)
             & np.isfinite(dataset["img"])
@@ -181,40 +157,30 @@ def _attach_measurement_variance(dataset, sensor):
         if np.any(~np.isfinite(fitted_variance)):
             raise ValueError("Stored img_variance must be finite at fitted pixels")
         if np.any(fitted_variance <= 0):
-            raise ValueError(
-                "Stored img_variance must be strictly positive at fitted pixels"
-            )
+            raise ValueError("Stored img_variance must be strictly positive at fitted pixels")
 
         dataset["img_variance"] = variance
         return dataset
 
     if sensor == "WIC":
-        raise ValueError(
-            "WIC orbit lacks pre-reflattening img_variance; load and save the "
-            "complete orbit with read_idl(..., measurement_variance=True, "
-            "poisson_offset=0.5)"
-        )
+        raise ValueError("WIC orbit lacks pre-reflattening img_variance; load and save the complete orbit with read_idl(..., measurement_variance=True, poisson_offset=0.5)")
 
     image = np.asarray(dataset["img"])
     multiplier = calibration_multiplier(dataset["date"].values, sensor)
-    variance = si_measurement_variance(
-        image,
-        multiplier,
-        poisson_offset=0.5,
-    )
+    variance = si_measurement_variance(image, multiplier, poisson_offset=0.5)
     valid = np.isfinite(image) & np.isfinite(multiplier) & (multiplier > 0)
     dataset["calibration_multiplier"] = (
         ("date", "row", "col"),
-        np.where(valid, multiplier, np.nan),
+        np.where(valid, multiplier, np.nan)
     )
     dataset["calibration_multiplier"].attrs = {
         "long_name": "FUVVIEW3 mission correction times flat field",
-        "units": "1",
+        "units": "1"
     }
 
     dataset["img_variance"] = (
         ("date", "row", "col"),
-        np.where(valid, variance, np.nan),
+        np.where(valid, variance, np.nan)
     )
     dataset["img_variance"].attrs = {
         "long_name": "Conditional detector measurement variance of img",
@@ -223,7 +189,7 @@ def _attach_measurement_variance(dataset, sensor):
         "excludes": (
             "calibration uncertainty, background-model discrepancy, and "
             "atmospheric-response uncertainty"
-        ),
+        )
     }
 
     return dataset
@@ -242,10 +208,7 @@ def _plot_limits(results, field, frame, symmetric):
     if field == "dgweight":
         return 0.0, 1.0
 
-    values = np.concatenate([
-        np.asarray(result[field].isel(date=frame)).ravel()
-        for result in results.values()
-    ])
+    values = np.concatenate([np.asarray(result[field].isel(date=frame)).ravel() for result in results.values()])
     values = values[np.isfinite(values)]
     if values.size == 0:
         return 0.0, 1.0
@@ -287,6 +250,7 @@ def _summary_metrics(sensor, variant, elapsed, result):
         "dgnorm_model": float(result["dgnorm_model"]),
         "dgfit_iterations": int(result["dgfit_iterations"]),
         "dgfit_converged": bool(result["dgfit_converged"]),
+        "dgsolver_flag": int(result["dgsolver_flag"])
     }
 
 
@@ -297,29 +261,13 @@ def _save_comparison_figures(sensor, results, output_directory, frame_count):
     frames = _representative_frames(first_result.sizes["date"], frame_count)
 
     for frame in frames:
-        figure, axes = plt.subplots(
-            len(VARIANTS),
-            len(PLOT_FIELDS),
-            figsize=(12, 14),
-            constrained_layout=True,
-        )
+        figure, axes = plt.subplots(len(VARIANTS), len(PLOT_FIELDS), figsize=(12, 14), constrained_layout=True)
 
         for column, (field, colour_map, symmetric) in enumerate(PLOT_FIELDS):
-            lower, upper = _plot_limits(
-                results,
-                field,
-                frame,
-                symmetric,
-            )
+            lower, upper = _plot_limits(results, field, frame, symmetric)
             for row, (variant, _) in enumerate(VARIANTS):
                 axis = axes[row, column]
-                image = axis.imshow(
-                    results[variant][field].isel(date=frame),
-                    origin="lower",
-                    cmap=colour_map,
-                    vmin=lower,
-                    vmax=upper,
-                )
+                image = axis.imshow(results[variant][field].isel(date=frame), origin="lower", cmap=colour_map, vmin=lower, vmax=upper)
                 axis.set_xticks([])
                 axis.set_yticks([])
                 if row == 0:
@@ -329,17 +277,9 @@ def _save_comparison_figures(sensor, results, output_directory, frame_count):
                 if row == len(VARIANTS) - 1:
                     figure.colorbar(image, ax=axes[:, column], shrink=0.65)
 
-        date = np.datetime_as_string(
-            first_result["date"].values[frame],
-            unit="s",
-        )
-        figure.suptitle(
-            f"{sensor} frame {frame} ({date}) — comparison, not validation"
-        )
-        figure.savefig(
-            output_directory / f"{sensor.lower()}_frame_{frame:04d}.png",
-            dpi=150,
-        )
+        date = np.datetime_as_string(first_result["date"].values[frame], unit="s")
+        figure.suptitle(f"{sensor} frame {frame} ({date}) — comparison, not validation")
+        figure.savefig(output_directory / f"{sensor.lower()}_frame_{frame:04d}.png", dpi=150)
         plt.close(figure)
 
 
@@ -381,13 +321,13 @@ def main(argv=None):
     input_paths = {
         "WIC": args.wic,
         "SI12": args.si12,
-        "SI13": args.si13,
+        "SI13": args.si13
     }
     common_settings = {
         "dampingVal": args.damping,
         "tukeyVal": args.tukey,
         "stop": args.stop,
-        "diagnostics": True,
+        "diagnostics": True
     }
 
     metric_rows = []
@@ -398,29 +338,15 @@ def main(argv=None):
         results = {}
         for variant, settings in VARIANTS:
             started = perf_counter()
-            result = backgroundmodel_BS(
-                dataset,
-                **common_settings,
-                **settings,
-            )
+            result = backgroundmodel_BS(dataset, **common_settings, **settings)
             elapsed = perf_counter() - started
             results[variant] = result
-            metric_rows.append(
-                _summary_metrics(sensor, variant, elapsed, result)
-            )
+            metric_rows.append(_summary_metrics(sensor, variant, elapsed, result))
 
-        _save_comparison_figures(
-            sensor,
-            results,
-            args.output_dir,
-            args.frames,
-        )
+        _save_comparison_figures(sensor, results, args.output_dir, args.frames)
 
     _write_metrics(metric_rows, args.output_dir)
-    print(
-        "Comparison outputs written. Scientific validation has not been "
-        "declared; review the complete-orbit evidence."
-    )
+    print("Comparison outputs written. Scientific validation has not been declared; review the complete-orbit evidence.")
 
 
 if __name__ == "__main__":

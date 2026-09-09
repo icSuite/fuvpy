@@ -12,11 +12,7 @@ def test_fit_diagnostics_are_absent_by_default():
 
 
 def test_fit_diagnostics_report_scalar_convergence():
-    result = backgroundmodel_BS(
-        _synthetic_wic(),
-        stop=1e-5,
-        diagnostics=True,
-    )
+    result = backgroundmodel_BS(_synthetic_wic(), stop=1e-5, diagnostics=True)
 
     assert result["dgfit_iterations"].dims == ()
     assert result["dgfit_converged"].dims == ()

@@ -64,6 +64,12 @@ live notes when the task changes project understanding.
   must remain numerically unchanged while uncertainty support is prototyped.
 - Keep the main scientific calculation visible. Prefer direct NumPy/SciPy
   operations and ordinary dictionaries over framework or class machinery.
+- Keep ordinary function calls, conditions, and error messages on one line
+  when they are readable that way. Do not split code across several lines
+  merely to satisfy a formatter or a conservative line-length target.
+- Do not add trailing commas to function calls, tuples, lists, or dictionaries
+  unless Python syntax requires one or the layout is genuinely clearer with
+  it. In particular, avoid formatter-style `(a, b, c,)` constructs.
 - Use short helpers for distinct calculations such as the weighted solve,
   covariance calculation, or prediction variance. Do not hide the fitting
   sequence behind a generic solver framework.

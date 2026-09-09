@@ -58,11 +58,19 @@ Validation status: combined complete-orbit script ready; execution blocked
   system before bounded fitting and is the operational default. `"full"`
   solves the equivalent bounded problem from all weighted rows as a reference.
   The ordinary released solver remains the default with `monotonic=False`.
+- Monotonic BVLS retains `max_iter=1000` and accepts a result only when
+  `result.success` is true. Failure raises by default. The explicit
+  `monotonic_fallback=True` option warns, solves the failed IRLS iteration with
+  the ordinary solver, and does not attempt another monotonic solve.
+- Scalar `dgsolver_flag` is always saved: 0 for a standard requested fit, 1
+  for monotonic success throughout, and 2 for monotonic failure followed by
+  standard fallback. It is independent of optional diagnostics.
 - `examples/scripts/validate_background_revision.py` accepts explicit native
   WIC, SI12, and SI13 orbit NetCDF files and runs the six cumulative Step 7
   variants. It writes representative four-field comparison figures and a CSV
-  of fit time, robust summary metrics, iteration count, and convergence. It is
-  a comparison tool, not a validation result.
+  of fit time, robust summary metrics, iteration count, convergence, and the
+  solver flag. Monotonic fallback is explicitly disabled so validation exposes
+  solver failure. It is a comparison tool, not a validation result.
 - Existing detector variance is preserved and checked on the fitted support.
   SI variance can be reconstructed when absent because SI is not reflattened.
   WIC variance cannot be reconstructed from the normally reflattened NetCDF
@@ -75,7 +83,7 @@ Validation status: combined complete-orbit script ready; execution blocked
 
 ## Verification
 
-The focused implementation and script-helper tests pass 57 tests. They cover the
+The focused implementation and script-helper tests pass 59 tests. They cover the
 dgsigma bin structure, known variance relation, and population invariance,
 plus equal within-bin weights, equal bin influence, frame independence, and
 excluded/empty-bin behavior, the legacy-coordinate scope, iteration-0 scale
@@ -84,8 +92,9 @@ calibration-table selection, loader opt-in behavior, masks and metadata, and
 unsupported calibration states, plus constant-variance equivalence, reduced
 high-variance influence, dgsigma separation, invalid fit variance, monotonic
 coefficient ordering and profiles, normal/full equivalence, preserved ordinary
-behavior, explicit bounded-solver failure, cumulative variant construction,
-frame selection, plotting scales, stored WIC variance preservation and
+behavior, all solver flags, strict failure, warning/fallback behavior, one-time
+monotonic attempts after failure, cumulative variant construction, frame
+selection, plotting scales, stored WIC variance preservation and
 rejection when absent or untraceable, SI variance attachment, and opt-in
 scalar convergence diagnostics. CLI help passes.
 

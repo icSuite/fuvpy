@@ -70,7 +70,16 @@ temporal B-spline unchanged. `monotonic_solver="normal"` first reduces the
 weighted image rows to the coefficient-sized normal system;
 `monotonic_solver="full"` is the full-row bounded reference. Both retain the
 same robust, spatial, and measurement row multipliers. The default remains the
-ordinary unconstrained solver, and failures raise `RuntimeError` explicitly.
+ordinary unconstrained solver. BVLS keeps `max_iter=1000`, and `result.success`
+is the criterion for accepting the bounded result.
+
+Monotonic failures raise `RuntimeError` by default. With the explicit
+`monotonic_fallback=True` option, failure instead emits a `RuntimeWarning` and
+the ordinary solver handles that IRLS iteration and all remaining iterations;
+the failed bounded solve is not retried. Every fit saves scalar
+`dgsolver_flag`: 0 standard requested, 1 monotonic succeeded throughout, and 2
+monotonic failed and standard fallback was used. This output does not depend
+on diagnostics.
 
 `examples/scripts/validate_background_revision.py` is a concise Step 7
 comparison tool. It requires explicit complete native-grid WIC, SI12, and SI13
@@ -88,8 +97,10 @@ rejects it rather than accepting variance with ambiguous provenance.
 
 The script writes representative figures showing `dgmodel`, `dgimg`,
 `dgsigma`, and `dgweight`, plus a CSV containing fit time, robust summary
-metrics, IRLS iteration count, and convergence. The last two are supplied by
-the minimal opt-in `backgroundmodel_BS(..., diagnostics=True)` fields
+metrics, IRLS iteration count, convergence, and `dgsolver_flag`. Fallback is
+explicitly disabled in the monotonic validation variant so a bounded-solver
+failure remains visible. Iteration count and convergence are supplied by the
+minimal opt-in `backgroundmodel_BS(..., diagnostics=True)` fields
 `dgfit_iterations` and `dgfit_converged`; neither field is returned by default.
 No diagnostic histories were added. The script does not run the SH model or
 change package defaults.
@@ -103,7 +114,7 @@ tests/test_measurement_uncertainty.py
 tests/test_background_measurement_weighting.py
 tests/test_background_monotonic.py
 tests/test_background_revision_validation.py
-tests/test_background_diagnostics.py` passes 57 tests. In addition to Steps
+tests/test_background_diagnostics.py` passes 59 tests. In addition to Steps
 1--3, tests cover SI and WIC equations and offsets, representative mission and
 flat-field selection, dimensions, masks, metadata, rejected calibration
 states, pre-reflattening calculation, and unchanged default loader behavior.
@@ -112,7 +123,8 @@ influence of a high-variance observation, separation from dgsigma estimation,
 and rejection of invalid fitted variance.
 Step 6 tests cover coefficient ordering, monotonic legacy-coordinate profiles,
 normal/full equivalence with combined row weights and damping, unchanged
-ordinary behavior, and explicit solver failures.
+ordinary behavior, all three solver flags, strict solver failure, explicit
+warning/fallback behavior, and no repeated monotonic attempt after fallback.
 The script tests cover the exact cumulative variant sequence, representative
 frames, shared robust limits, stored WIC variance preservation, explicit WIC
 rejection when variance is absent, invalid, or lacks the required offset and

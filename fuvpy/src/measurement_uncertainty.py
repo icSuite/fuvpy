@@ -23,20 +23,18 @@ WIC_REFERENCE_BRIGHTNESS_KR = 0.1
 WIC_PIXELS_PER_RESOLUTION_CELL = 4
 WIC_EQUIVALENT_QUANTA = 23.0
 
-CALIBRATION_DIRECTORY = (
-    Path(__file__).resolve().parents[1] / "data" / "calibration"
-)
+CALIBRATION_DIRECTORY = Path(__file__).resolve().parents[1] / "data" / "calibration"
 
 FLATFIELD_FILES = {
     "WIC": "wic_flatfield_dbase.idl",
     "SI12": "si12_flatfield_dbase.idl",
-    "SI13": "si_flatfield_dbase.idl",
+    "SI13": "si_flatfield_dbase.idl"
 }
 
 MISSION_FIELDS = {
     "WIC": "finalwic",
     "SI12": "finals12",
-    "SI13": "finals13",
+    "SI13": "finals13"
 }
 
 BOOM_LOSS_DATE = datetime(2000, 1, 1) + timedelta(days=277)
@@ -47,9 +45,7 @@ def _sensor_name(sensor):
 
     sensor = str(sensor).strip().upper()
     if sensor not in FLATFIELD_FILES:
-        raise ValueError(
-            "Measurement variance is implemented for WIC, SI12, and SI13"
-        )
+        raise ValueError("Measurement variance is implemented for WIC, SI12, and SI13")
 
     return sensor
 
@@ -102,9 +98,7 @@ def mission_correction(dates, sensor):
     for index, date in enumerate(dates):
         match = (years == date.year) & (days == date.dayofyear)
         if np.count_nonzero(match) != 1:
-            raise ValueError(
-                f"No unique {sensor} mission correction for {date.date()}"
-            )
+            raise ValueError(f"No unique {sensor} mission correction for {date.date()}")
 
         correction[index] = reference_sensitivity / sensitivity[match][0]
 
@@ -117,10 +111,7 @@ def _flatfield_dates(table):
     years = [int(value) for value in table["yearlist"]]
     days = [int(value) for value in table["daylist"]]
 
-    return np.array([
-        datetime(year, 1, 1) + timedelta(days=day - 1)
-        for year, day in zip(years, days)
-    ])
+    return np.array([datetime(year, 1, 1) + timedelta(days=day - 1) for year, day in zip(years, days)])
 
 
 def flatfield_multiplier(date, sensor):
@@ -150,14 +141,7 @@ def flatfield_multiplier(date, sensor):
     flatfield = np.repeat(profile[:, None], profile.size, axis=1)
 
     if date >= BOOM_LOSS_DATE:
-        flatfield = rotate(
-            flatfield,
-            -1.85,
-            reshape=False,
-            order=1,
-            mode="nearest",
-            prefilter=False,
-        )
+        flatfield = rotate(flatfield, -1.85, reshape=False, order=1, mode="nearest", prefilter=False)
         flatfield = np.roll(flatfield, 2, axis=0)
 
     return flatfield
@@ -172,9 +156,7 @@ def calibration_multiplier(dates, sensor):
 
     multiplier = []
     for date, mission_value in zip(dates, mission):
-        multiplier.append(
-            mission_value * flatfield_multiplier(date, sensor)
-        )
+        multiplier.append(mission_value * flatfield_multiplier(date, sensor))
 
     return np.asarray(multiplier)
 
@@ -196,12 +178,8 @@ def si_measurement_variance(image, multiplier, poisson_offset=0.0):
 def wic_variance_coefficient():
     """Return the published reference WIC coefficient in AD units."""
 
-    signal_per_pixel = (
-        WIC_REFERENCE_BRIGHTNESS_KR * WIC_SENSITIVITY_AD_PER_KR
-    )
-    signal_per_resolution_cell = (
-        WIC_PIXELS_PER_RESOLUTION_CELL * signal_per_pixel
-    )
+    signal_per_pixel = WIC_REFERENCE_BRIGHTNESS_KR * WIC_SENSITIVITY_AD_PER_KR
+    signal_per_resolution_cell = WIC_PIXELS_PER_RESOLUTION_CELL * signal_per_pixel
 
     return signal_per_resolution_cell / WIC_EQUIVALENT_QUANTA
 
