@@ -18,7 +18,7 @@ from scipy.io import readsav
 
 from fuvpy.src.measurement_uncertainty import calibration_multiplier, si_measurement_variance, wic_measurement_variance
 
-def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True, measurement_variance=False, poisson_offset=0.0):
+def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True, measurement_variance=False, poisson_offset=0.0, wic_variance_model='reference'):
     '''
     Load FUV images into a xarray.Dataset
 
@@ -44,6 +44,12 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
         the direct plug-in estimate. A value of 0.5 supplies an explicit
         low-count Jeffreys-Poisson offset. Used only when
         ``measurement_variance=True``.
+    wic_variance_model : {'reference', 'correction_aware'}, optional
+        WIC detector-variance model. ``reference`` uses the published 10.65 AD
+        coefficient everywhere. ``correction_aware`` multiplies this
+        coefficient by the reconstructed mission-gain and flat-field
+        multiplier. Used only for WIC when ``measurement_variance=True``.
+        Default is ``reference``.
 
     Returns
     -------
@@ -130,7 +136,7 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
     # Reflattening is treated as a deterministic additive adjustment, so this
     # conditional detector variance is retained unchanged afterward.
     if measurement_variance:
-        imgs = _add_measurement_variance(imgs, calibration_flags, airglow_scales, poisson_offset)
+        imgs = _add_measurement_variance(imgs, calibration_flags, airglow_scales, poisson_offset, wic_variance_model)
 
     # Reapply WIC's flat field
     if (imgs['id']=='WIC')&reflat:
@@ -149,7 +155,7 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
     return imgs
 
 
-def _add_measurement_variance(imgs, calibration_flags, airglow_scales, poisson_offset):
+def _add_measurement_variance(imgs, calibration_flags, airglow_scales, poisson_offset, wic_variance_model='reference'):
     """Attach conditional detector variance to calibrated IMAGE/FUV data."""
 
     sensor = str(imgs['id'].values)
@@ -168,6 +174,8 @@ def _add_measurement_variance(imgs, calibration_flags, airglow_scales, poisson_o
         # corrected-AD field used by fuvpy.
         if np.any(~np.isin(calibration_flags, [1, 3])):
             raise ValueError("WIC measurement variance requires calibration flag 1 or 3")
+        if wic_variance_model not in ['reference', 'correction_aware']:
+            raise ValueError("wic_variance_model must be 'reference' or 'correction_aware'")
     else:
         raise ValueError("Measurement variance is implemented for WIC, SI12, and SI13")
 
@@ -179,8 +187,12 @@ def _add_measurement_variance(imgs, calibration_flags, airglow_scales, poisson_o
         variance_model = ("SI Poisson counting variance: a * img + poisson_offset * a^2")
         variance_units = "corrected count squared"
     else:
-        variance = wic_measurement_variance(image, poisson_offset=poisson_offset)
-        variance_model = ("WIC reference compound-Poisson variance: 10.65 * img + poisson_offset * 10.65^2")
+        if wic_variance_model == 'reference':
+            variance = wic_measurement_variance(image, poisson_offset=poisson_offset)
+            variance_model = "WIC reference compound-Poisson variance: 10.65 * img + poisson_offset * 10.65^2"
+        else:
+            variance = wic_measurement_variance(image, poisson_offset=poisson_offset, multiplier=multiplier)
+            variance_model = "WIC correction-aware compound-Poisson variance: (10.65 * a) * img + poisson_offset * (10.65 * a)^2"
         variance_units = "AD unit squared"
 
     valid = (np.isfinite(imgs['mlat']) & np.isfinite(multiplier) & (multiplier > 0))
@@ -199,6 +211,8 @@ def _add_measurement_variance(imgs, calibration_flags, airglow_scales, poisson_o
         'units': variance_units,
         'model': variance_model,
         'poisson_offset': float(poisson_offset)}
+    if sensor == 'WIC':
+        imgs['img_variance'].attrs['wic_variance_model'] = wic_variance_model
 
     return imgs
 

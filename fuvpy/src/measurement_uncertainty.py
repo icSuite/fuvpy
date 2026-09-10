@@ -176,16 +176,21 @@ def wic_variance_coefficient():
     return signal_per_resolution_cell / WIC_EQUIVALENT_QUANTA
 
 
-def wic_measurement_variance(image, poisson_offset=0.0):
-    """Return the reference WIC compound-Poisson variance in AD squared.
+def wic_measurement_variance(image, poisson_offset=0.0, multiplier=None):
+    """Return the WIC compound-Poisson variance in AD squared.
 
     The published equivalent-output-quanta relation gives
     ``variance = 10.65*image + poisson_offset*10.65**2`` (10.65 rounded).
+    If a calibration multiplier is supplied, the correction-aware candidate
+    instead uses ``10.65*multiplier`` as the coefficient. This treats the
+    multiplier as known; it does not represent calibration uncertainty.
     Additive CCD/read noise and sub-resolution-cell covariance are unknown and
     therefore excluded.
     """
 
     poisson_offset = _poisson_offset(poisson_offset)
     coefficient = wic_variance_coefficient()
+    if multiplier is not None:
+        coefficient = coefficient*np.asarray(multiplier)
 
     return coefficient*np.asarray(image) + poisson_offset*coefficient**2

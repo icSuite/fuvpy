@@ -105,12 +105,13 @@ For the selected pixels, let:
 - `G` be the joint spatial and temporal B-spline design matrix;
 - `w` be the converged Tukey weights;
 - `ws` be the spatial weights; and
+- `wm` be the optional inverse-standard-deviation measurement multiplier; and
 - `R` be the diagonal damping matrix.
 
 The current code multiplies each row by
 
 ```text
-q = w * ws
+q = sqrt(w) * ws * wm
 ```
 
 before constructing the normal equations. It therefore solves
@@ -128,9 +129,20 @@ or, equivalently,
 minimize || Q (d - G m) ||^2 + m.T R m.
 ```
 
-The square on the combined weights is important. An uncertainty refactor must
-first reproduce this exact calculation, whether or not a different weighting
-convention might be preferable scientifically.
+Here `w` is the conventional Tukey objective weight. Its square root enters
+the design matrix so the normal equations contain `w` once. The spatial and
+measurement terms are already defined as row multipliers and enter directly.
+
+The zeroth-order regularization is scaled from the initial weighted system:
+
+```text
+R = dampingVal * median(diag(G.T Q^2 G)) * I.
+```
+
+This scale is frozen while IRLS changes the Tukey weights. It makes
+`dampingVal` dimensionless and invariant to a uniform rescaling of all row
+multipliers, while relative spatial and measurement weights still change the
+fit as intended.
 
 The code currently retains the fitted image, corrected image, final Tukey
 weights, residual-spread model, and two norms. It does not retain the fitted
@@ -179,7 +191,10 @@ fixed damping.
 
 The SH stage fits `dgimg / dgsigma`. Its design matrix is also divided by
 `dgsigma`. It starts with the BS Tukey weights and adds equal-area spatial
-weights before another robust iterative solve.
+weights before another robust iterative solve. Its Tukey values also enter as
+square-root row multipliers. A bin with `N` fitted pixels uses `1/sqrt(N)` per
+row, giving each populated equal-area bin equal total squared influence. SH
+uses the same initial-`GTG` regularization scale as BS.
 
 Any conditional SH covariance must state its units. The coefficient fit is in
 the normalized system, whereas `shmodel` is converted back to detector units

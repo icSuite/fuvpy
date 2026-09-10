@@ -31,6 +31,16 @@ def test_wic_reference_variance_and_low_count_offset():
     np.testing.assert_allclose(variance, coefficient*image + 0.5*coefficient**2)
 
 
+def test_wic_correction_aware_variance_uses_calibration_multiplier():
+    image = np.array([10.0, 0.0])
+    multiplier = np.array([1.0, 1.5])
+    coefficient = wic_variance_coefficient()*multiplier
+
+    variance = wic_measurement_variance(image, poisson_offset=0.5, multiplier=multiplier)
+
+    np.testing.assert_allclose(variance, coefficient*image + 0.5*coefficient**2)
+
+
 def test_packaged_tables_select_representative_mission_multipliers():
     for sensor in ["WIC", "SI12", "SI13"]:
         np.testing.assert_allclose(mission_correction(["2000-06-19"], sensor), [1.0])
@@ -76,6 +86,24 @@ def test_si_variance_follows_image_dimensions_mask_and_metadata(monkeypatch):
     assert np.isnan(result["calibration_multiplier"][0, 1, 0])
     assert result["img_variance"].attrs["poisson_offset"] == 0.5
     assert "calibration uncertainty" in result["img_variance"].attrs["excludes"]
+
+
+def test_wic_correction_aware_model_is_selectable_when_loading(monkeypatch):
+    multiplier = np.array([[[1.0, 1.5], [2.0, 2.5]]])
+    monkeypatch.setattr(load, "readsav", lambda filename: {"imageinfo": _mock_imageinfo()})
+    monkeypatch.setattr(load, "calibration_multiplier", lambda dates, sensor: multiplier)
+
+    result = load.read_idl("mock.idl", remove_bad=False, reflat=False, measurement_variance=True, poisson_offset=0.5, wic_variance_model="correction_aware")
+
+    coefficient = wic_variance_coefficient()*multiplier
+    expected = coefficient*10.0 + 0.5*coefficient**2
+    np.testing.assert_allclose(result["img_variance"], expected)
+    assert result["img_variance"].attrs["wic_variance_model"] == "correction_aware"
+
+
+def test_invalid_wic_variance_model_is_rejected():
+    with pytest.raises(ValueError, match="reference.*correction_aware"):
+        load._add_measurement_variance(_measurement_dataset("WIC"), calibration_flags=[1], airglow_scales=[[0, 0, 0]], poisson_offset=0.5, wic_variance_model="invalid")
 
 
 @pytest.mark.parametrize(

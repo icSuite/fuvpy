@@ -21,6 +21,16 @@ def test_constant_variance_matches_unweighted_fit_without_damping():
         np.testing.assert_allclose(weighted[field], ordinary[field], rtol=1e-10, atol=1e-10)
 
 
+def test_constant_variance_does_not_change_dimensionless_damping():
+    imgs = _with_variance(_synthetic_wic(), value=4.0)
+
+    ordinary = background.backgroundmodel_BS(imgs, dampingVal=1, stop=1e-5)
+    weighted = background.backgroundmodel_BS(imgs, dampingVal=1, stop=1e-5, input_variance="img_variance", variance_weighted=True)
+
+    for field in ["dgmodel", "dgimg", "dgweight", "dgsigma"]:
+        np.testing.assert_allclose(weighted[field], ordinary[field], rtol=1e-9, atol=1e-9)
+
+
 def test_high_variance_observation_has_less_influence():
     clean = _synthetic_wic()
     contaminated = _with_variance(clean)

@@ -40,15 +40,17 @@ The variance can be used explicitly in the BS inversion with
 ``backgroundmodel_BS(..., input_variance="img_variance",
 variance_weighted=True)``. This multiplies data-fit rows by
 ``1/sqrt(img_variance)``. It does not replace the empirical ``dgsigma`` used
-for Tukey robust weighting. If ``dampingVal`` is nonzero, its scale must be
-reassessed because absolute measurement weights change the balance between
-the data and regularization.
+for Tukey robust weighting. ``dampingVal`` is dimensionless: BS and SH scale
+the identity regularization by the median supported positive diagonal of
+``GTG`` from the initial weighted design matrix and keep that scale fixed
+through IRLS. Historical numerical
+damping values therefore need to be retuned.
 
 ``backgroundmodel_BS(..., asymmetric_legacy=True)`` keeps the legacy
 ``cos(SZA)/cos(DZA)`` coordinate unchanged on the dayside and maps negative
 values to ``nightside_width*tanh(x/nightside_width)``. The default width is
-0.2. Its default spatial knots scale the three negative anchors with that
-width while retaining dayside anchors at 0, 0.25, 1.5, and 3.5. Custom
+0.2. Its default spatial-knot path is experimental and currently deferred.
+Custom
 ``sKnots`` remain authoritative. The released coordinate is unchanged by the
 default ``asymmetric_legacy=False`` setting, and this option is unavailable
 for VIS.

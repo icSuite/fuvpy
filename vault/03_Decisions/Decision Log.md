@@ -161,3 +161,17 @@ freezing.
 fit variants. Keep the current defaults (`True` and 1) for reproducibility;
 use `False` and 0 to test an unweighted spatial fit with the residual scale
 frozen after its initial estimate.
+
+## 2026-09-10 — Prioritize the revised model over exact reproduction
+
+**Decision:** The purpose of `background_model_revision` is to improve the BS
+background estimate used by the conductance pipeline, not to reproduce the
+Ohma implementation exactly. Retain the conventional `sqrt(Tukey)` row
+multiplier as the revised candidate. Keep the published convention identifiable
+only where needed to make comparisons interpretable.
+
+**Scope:** Treat `asymmetric_legacy` as experimental and defer its hard-coded
+knot defect. Defer correction of the stored residual/model norms until those
+diagnostics are needed for damping selection or an L-curve. The immediate
+production issues are the output support mask, silent keyword handling, and a
+safe nonzero damping scale.

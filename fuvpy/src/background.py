@@ -118,6 +118,19 @@ def _solve_monotonic_bs(weighted_design, weighted_data, damping, n_scp, n_tcp, s
 
     return transform @ result.x
 
+
+def _normal_matrix_scale(normal_matrix):
+    """Return the median scale of coefficient columns supported by the data."""
+
+    diagonal = np.diag(normal_matrix)
+    largest = np.max(diagonal)
+    tolerance = largest*diagonal.size*np.finfo(float).eps
+    supported = diagonal[diagonal > tolerance]
+    if supported.size == 0:
+        raise ValueError("The weighted design matrix contains no supported coefficients")
+
+    return np.median(supported)
+
 def backgroundmodel_BS(imgs,**kwargs):
     '''
     Function to model the FUV dayglow and subtract it from the input image
@@ -131,8 +144,9 @@ def backgroundmodel_BS(imgs,**kwargs):
     sOrder : int, optional
         Order of the spatial spline fit. The default is 3.
     dampingVal : float, optional
-        Damping (Tikhonov regularization).
-        The default is 0 (no damping).
+        Dimensionless damping (zeroth-order Tikhonov regularization). The
+        identity matrix is scaled by `dampingVal` times the median supported
+        positive diagonal of the initial weighted `GTG`. The default is 0.
     tukeyVal : float, optional
         Determines to what degree outliers are down-weighted.
         Iterative reweights is (1-(residuals/(tukeyVal*rmse))^2)^2
@@ -229,6 +243,18 @@ def backgroundmodel_BS(imgs,**kwargs):
     diagnostics = bool(kwargs.pop('diagnostics')) if 'diagnostics' in kwargs.keys() else False
     inplace = bool(kwargs.pop('inplace')) if 'inplace' in kwargs.keys() else False
 
+    # These limits belonged to the old fit API. Current files apply detector
+    # and viewing-angle masks in read_idl(), but the paper scripts still pass
+    # the historical arguments and are kept runnable for reference.
+    obsolete = [name for name in ['dzalim', 'minlat'] if name in kwargs]
+    for name in obsolete:
+        kwargs.pop(name)
+    if obsolete:
+        warnings.warn(f"{', '.join(obsolete)} no longer restrict backgroundmodel_BS; apply geometry limits when loading the images", DeprecationWarning, stacklevel=2)
+    if kwargs:
+        names = ', '.join(sorted(kwargs))
+        raise TypeError(f"Unexpected backgroundmodel_BS keyword argument(s): {names}")
+
     if noise_model not in ['legacy', 'binned']:
         raise ValueError("noise_model must be 'legacy' or 'binned'")
 
@@ -307,18 +333,18 @@ def backgroundmodel_BS(imgs,**kwargs):
     G_s=np.vstack(G_s)
 
     # Index of data to use in model
-    ind = (imgs['sza'].stack(z=('row','col')).values >= 0) & (np.isfinite(imgs[inImg].stack(z=('row','col')).values)) & (fraction>sKnots[0]) & (fraction<sKnots[-1])
+    fit_support = (imgs['sza'].stack(z=('row','col')).values >= 0) & (np.isfinite(imgs[inImg].stack(z=('row','col')).values)) & (fraction>sKnots[0]) & (fraction<sKnots[-1])
 
     # Spatial sampling weights
     if spatial_weighting == 'gaussian':
         ws = 1/np.exp(-0.5*(fraction/1.5)**2)
     else:
         spatial_bins = np.arange(sKnots[0], sKnots[-1] + 0.1, 0.1)
-        ws = _bin_population_weights(fraction, ind, spatial_bins)
+        ws = _bin_population_weights(fraction, fit_support, spatial_bins)
 
     # Make everything flat
     d_s = imgs[inImg].stack(z=('row','col')).values.flatten()
-    ind = ind.flatten()
+    ind = fit_support.flatten()
     ws = ws.flatten()
     w = np.ones_like(d_s)
 
@@ -346,22 +372,28 @@ def backgroundmodel_BS(imgs,**kwargs):
 
         measurement_w[ind] = 1/np.sqrt(measurement_variance[ind])
 
-    # Damping (zeroth-order Tikhonov regularization)
-    damping = dampingVal*np.ones(G_s.shape[1])
-    R = np.diag(damping)
-
     # Iterativaly solve the inverse problem
     diff = 1e10
     iteration = 0
     m = None
+    R = None
     use_monotonic = monotonic
     solver_flag = 1 if monotonic else 0
     while (diff>stop)&(iteration < 100):
         # Keep robust, spatial-sampling, and measurement-precision roles
-        # visible before forming the weighted least-squares system.
-        fit_w = w[ind] * ws[ind] * measurement_w[ind]
+        # visible before forming the weighted least-squares system. Tukey
+        # values are objective weights; the other two are row multipliers.
+        fit_w = np.sqrt(w[ind]) * ws[ind] * measurement_w[ind]
         weighted_design = G_s[ind, :] * fit_w[:, None]
         weighted_data = d_s[ind] * fit_w
+        GTG = weighted_design.T@weighted_design
+        GTd = weighted_design.T@weighted_data
+
+        # Fix the damping scale before later IRLS iterations change w.
+        if R is None:
+            gtg_magnitude = _normal_matrix_scale(GTG)
+            R = dampingVal*gtg_magnitude*np.eye(G_s.shape[1])
+
         if use_monotonic:
             try:
                 m_s = _solve_monotonic_bs(weighted_design, weighted_data, R, n_scp, n_tcp, monotonic_solver)
@@ -372,7 +404,7 @@ def backgroundmodel_BS(imgs,**kwargs):
                 use_monotonic = False
                 solver_flag = 2
         if not use_monotonic:
-            m_s = lstsq(weighted_design.T@weighted_design + R, weighted_design.T@weighted_data, lapack_driver='gelsy')[0]
+            m_s = lstsq(GTG + R, GTd, lapack_driver='gelsy')[0]
         mNew    = M@m_s.reshape((n_scp, n_tcp)).T
         dm=[]
         for i, tt in enumerate(time):
@@ -384,9 +416,9 @@ def backgroundmodel_BS(imgs,**kwargs):
         if iteration <= dgsigma_freeze_iteration:
             sigma = np.full_like(d_s,np.nan)
             if noise_model == 'legacy':
-                sigma[ind] = _noisemodel(fraction.flatten()[ind], d_s[ind], dm.flatten()[ind], w[ind]*ws[ind], sKnots)
+                sigma[ind] = _noisemodel(fraction.flatten()[ind], d_s[ind], dm.flatten()[ind], w[ind]*ws[ind]**2, sKnots)
             else:
-                sigma[ind] = _noisemodel_binned(fraction.flatten()[ind], d_s[ind], dm.flatten()[ind], w[ind]*ws[ind], sKnots)
+                sigma[ind] = _noisemodel_binned(fraction.flatten()[ind], d_s[ind], dm.flatten()[ind], w[ind]*ws[ind]**2, sKnots)
         w[ind] = (1 - np.minimum(1,(residuals/(tukeyVal*sigma[ind]))**2))**2
 
         if m is not None: diff = np.sqrt(np.mean((mNew-m)**2))/(1+np.sqrt(np.mean(mNew**2)))
@@ -410,12 +442,13 @@ def backgroundmodel_BS(imgs,**kwargs):
         imgs['dgfit_iterations'] = iteration
         imgs['dgfit_converged'] = iteration < 100 and np.isfinite(diff) and diff <= stop
 
-    # Remove pixels outside model scope
-    ind = (imgs.sza>=0)
-    imgs['dgmodel'] = xr.where(~ind,np.nan,imgs['dgmodel'])
-    imgs['dgimg'] = xr.where(~ind,np.nan,imgs['dgimg'])
-    imgs['dgweight'] = xr.where(~ind,np.nan,imgs['dgweight'])
-    imgs['dgsigma'] = xr.where(~ind,np.nan,imgs['dgsigma'])
+    # Do not return extrapolated models or fitting weights outside the pixels
+    # that actually contributed to the inverse problem.
+    fit_support = xr.DataArray(fit_support.reshape((n_t, len(imgs.row), len(imgs.col))), dims=['date', 'row', 'col'], coords={'date': imgs.date, 'row': imgs.row, 'col': imgs.col})
+    imgs['dgmodel'] = xr.where(fit_support,imgs['dgmodel'],np.nan)
+    imgs['dgimg'] = xr.where(fit_support,imgs['dgimg'],np.nan)
+    imgs['dgweight'] = xr.where(fit_support,imgs['dgweight'],np.nan)
+    imgs['dgsigma'] = xr.where(fit_support,imgs['dgsigma'],np.nan)
 
     # Add attributes
     imgs['dgmodel'].attrs = {'long_name': 'BS model'}
@@ -539,9 +572,10 @@ def backgroundmodel_SH(imgs,Nsh,Msh,**kwargs):
         Order of the SH
     Msh : int
         Degree of the SH
-    dampingVal : TYPE, optional
-        Damping to reduce the influence of the time-dependent part of the model.
-        The default is 0 (no damping).
+    dampingVal : float, optional
+        Dimensionless damping. The identity matrix is scaled by
+        `dampingVal` times the median supported positive diagonal of the
+        initial weighted `GTG`. The default is 0 (no damping).
     tukeyVal : float, optional
         Determines to what degree outliers are down-weighted.
         Iterative reweights is (1-(residuals/(tukeyVal*rmse))^2)^2
@@ -644,7 +678,9 @@ def backgroundmodel_SH(imgs,Nsh,Msh,**kwargs):
         count=np.full(grid.shape[1],0)
         un,count_un=np.unique(gbin,return_counts=True)
         count[un]=count_un
-        ws[i,ind[i]]=1/count[gbin]
+        # Least squares squares this row multiplier. Using 1/sqrt(N) gives
+        # every populated equal-area bin the same total influence.
+        ws[i,ind[i]]=1/np.sqrt(count[gbin])
 
     # Make everything flat
     d_s = d.flatten()
@@ -652,16 +688,25 @@ def backgroundmodel_SH(imgs,Nsh,Msh,**kwargs):
     ws = ws.flatten()
     w = imgs['dgweight'].stack(z=('row','col')).values.flatten()
 
-    # Damping
-    damping = dampingVal*np.ones(G_s.shape[1])
-    R = np.diag(damping)
-
     diff = 1e10*stop
     iteration = 0
     m = None
+    R = None
     while (diff>stop)&(iteration < 100):
         # Solve for spline amplitudes
-        m_s = np.linalg.lstsq((G_s[ind,:]*w[ind,None]*ws[ind,None]).T@(G_s[ind,:]*w[ind,None]*ws[ind,None])+R,(G_s[ind,:]*w[ind,None]*ws[ind,None]).T@(d_s[ind]*w[ind]*ws[ind]),rcond=None)[0]
+        fit_w = np.sqrt(w[ind])*ws[ind]
+        weighted_G = G_s[ind, :]*fit_w[:, None]
+        weighted_d = d_s[ind]*fit_w
+
+        GTG = weighted_G.T@weighted_G
+        GTd = weighted_G.T@weighted_d
+
+        # Fix the damping scale before later IRLS iterations change w.
+        if R is None:
+            gtg_magnitude = _normal_matrix_scale(GTG)
+            R = dampingVal*gtg_magnitude*np.eye(G_s.shape[1])
+
+        m_s = np.linalg.lstsq(GTG + R, GTd, rcond=None)[0]
 
         # Retrieve B-spline smooth model paramters (coarse)
         mNew    = M@m_s.reshape((n_G, n_cp)).T

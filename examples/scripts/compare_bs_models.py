@@ -25,7 +25,7 @@ SENSOR_DIRECTORIES = {
 BS_SETTINGS = {
     "stop": 0.01,
     "tukeyVal": 5,
-    "dampingVal": 1e-3
+    "dampingVal": 1e-2
 }
 
 
@@ -170,8 +170,9 @@ def process_sensor(sensor, directory):
     # Reflattening estimates one common WIC background from the loaded image
     # sequence. The example files contain partial orbits, so keep the original
     # FUVVIEW3 WIC flat field for this comparison.
-    reflat = sensor != "WIC"
-    images = fuv.read_idl([str(path) for path in files], dzalim=75, reflat=reflat, measurement_variance=True, poisson_offset=0.5)
+    reflat = sensor == "WIC"
+    #images = fuv.read_idl([str(path) for path in files], dzalim=75, reflat=reflat, measurement_variance=True, poisson_offset=0.5, wic_variance_model="correction_aware")
+    images = fuv.read_idl([str(path) for path in files], dzalim=75, reflat=reflat, measurement_variance=True, poisson_offset=0.5, wic_variance_model='reference')
 
     sequences = split_image_sequences(images)
     output_directory = OUTPUT_DIRECTORY / sensor.lower()
@@ -192,10 +193,10 @@ def process_sensor(sensor, directory):
         m2 = fuv.backgroundmodel_BS(sequence, noise_model="binned", **settings)
 
         # Original + variance
-        m3 = fuv.backgroundmodel_BS(sequence, variance_weighted=True, **settings)
+        m3 = fuv.backgroundmodel_BS(sequence, noise_model="binned", variance_weighted=True, **settings)
 
         # Original + monotonic
-        m4 = fuv.backgroundmodel_BS(sequence, monotonic=True, **settings)
+        m4 = fuv.backgroundmodel_BS(sequence, noise_model="binned", monotonic=True, **settings)
 
         # Combined revised model
         m5 = fuv.backgroundmodel_BS(sequence, noise_model="binned", variance_weighted=True, monotonic=True, **settings)

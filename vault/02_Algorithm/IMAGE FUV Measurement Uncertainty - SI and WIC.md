@@ -519,7 +519,7 @@ variances must not be added as if the two stages were independent.
 | SI12 | $v_i=a_i y_i$, with an explicit zero-count rule | Opt-in loader integration implemented; complete-sequence validation remains |
 | SI13 | $v_i=a_i y_i$, with an explicit zero-count rule | Opt-in loader integration implemented; direct integer-recovery verification is still desirable |
 | WIC, reference | $v_i=10.65y_i+p(10.65)^2$ | Default opt-in WIC loader model; use $p=0.5$ for low-count weighting |
-| WIC, correction-aware | $v_i=10.65a_i y_i+p(10.65a_i)^2$ | Explicit loader alternative; sensitivity interpretation remains unresolved |
+| WIC, correction-aware | $v_i=10.65a_i y_i+p(10.65a_i)^2$ | Implemented as `read_idl(..., wic_variance_model="correction_aware")`; sensitivity interpretation remains unresolved |
 
 The current residual-derived laws, including
 $v_{\mathrm{WIC}}=19.0424B$, must not replace these detector equations.

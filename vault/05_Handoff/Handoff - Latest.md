@@ -3,7 +3,15 @@
 Last updated: 2026-09-09
 Branch: `background_model_revision`
 Checkpoint: Steps 1 through 6 complete
-Validation: script prepared; complete-orbit execution pending
+Validation: read-only code audit complete; repairs required before complete-orbit execution
+
+## Audit checkpoint
+
+The 2026-09-09 BS audit is recorded in `vault/03_Validation/BS Code Audit - 2026-09-09.md`. It verified the tensor-product design and monotonic transform, but confirmed three defects: returned fields exceed the actual fit-support mask, unrecognized keywords are silently ignored, and `_asymmetric_legacy_knots()` overwrites its calculated knots with a hard-coded list. On 2026-09-10 the user deferred the asymmetric-coordinate defect because that path remains experimental.
+
+The audit also established that the recent `sqrt(Tukey)` change is conventional IRLS but differs from the explicit `W**2` convention in Ohma et al. and the released implementation. Revised bin-population weighting and dimensionless damping likewise change the method. The validation script's `released` label is therefore not currently accurate.
+
+On 2026-09-10 the support mask and keyword handling were fixed. Historical `dzalim` and `minlat` keywords are retained only as warned compatibility arguments for the Ohma paper scripts. Both BS and SH now scale damping from numerically supported positive `GTG` diagonal entries, and the empirical BS `dgsigma` calculation uses `Tukey * spatial_multiplier**2`. Measurement variance remains excluded from `dgsigma` intentionally.
 
 ## Completed
 
@@ -51,6 +59,14 @@ Variance is calculated before optional WIC reflattening and kept unchanged
 under the conditional deterministic-additive interpretation. Package data now
 include the original small mission and flat-field tables.
 
+WIC loading additionally supports
+`wic_variance_model="correction_aware"`. It uses `kappa_i=10.65*a_i`, where
+`a_i` is the reconstructed mission-gain times flat-field multiplier, in
+`variance=kappa_i*img + poisson_offset*kappa_i**2`. The constant 10.65
+coefficient remains the `"reference"` default. The selected model is stored
+on `img_variance`. This remains conditional on the multiplier being correct
+and does not add flat-field or gain uncertainty.
+
 The BS fit now has an explicit opt-in measurement weighting path:
 `input_variance` names the Dataset variance variable and
 `variance_weighted=True` applies `1/sqrt(variance)` to each fitted data row.
@@ -59,9 +75,16 @@ row multipliers. Measurement variance is deliberately absent from both
 empirical dgsigma regressions and Tukey residual scaling. Fitted variance must
 be finite and strictly positive. The default remains unweighted.
 
-Absolute measurement precision changes the balance between data and the
-existing regularization term. Any nonzero `dampingVal` therefore requires a
-new scale assessment rather than assuming its released tuning transfers.
+BS and SH now use dimensionless zeroth-order damping:
+`R=dampingVal*scale*I`, where `scale` is the median supported positive diagonal
+of the initial weighted normal matrix. It remains fixed while IRLS updates the Tukey weights. A
+uniform change in row precision therefore does not alter relative damping,
+but historical numeric `dampingVal` settings do not transfer directly.
+
+The stored Tukey fields remain conventional objective weights. Both fits use
+their square roots as row multipliers, so the least-squares objective contains
+the Tukey weight once rather than squaring it again. Spatial and measurement
+terms remain direct row multipliers.
 
 The optional `asymmetric_legacy=True` coordinate starts from
 `x=cos(SZA)/cos(DZA)`, preserves `x>=0`, and maps negative values to
@@ -118,6 +141,20 @@ change package defaults.
 
 ## Verification
 
+The audit result supersedes older passing-test statements below where they
+conflict: after the 2026-09-10 repairs, the current complete suite has 79 passes and three failures. The BS
+failure is the hard-coded asymmetric-knot override; the other two concern
+missing measurement-variance metadata.
+
+The revised Tukey and dimensionless-damping calculations pass 34 focused BS
+tests covering ordinary and monotonic solves, measurement and spatial weights,
+`dgsigma`, freeze behavior, and diagnostics. The new nonzero-damping test
+confirms invariance to a uniform measurement-precision scale. A synthetic
+BS-to-SH smoke test completed with finite SH output. A broader 76-test run had
+73 passes and three failures unrelated to these edits: two known missing
+measurement-variance metadata fields and the current experimental hard-coded
+asymmetric-knot override.
+
 `pytest -q tests/test_background_dgsigma.py
 tests/test_background_spatial_weighting.py
 tests/test_background_dgsigma_freeze.py
@@ -144,6 +181,45 @@ Diagnostics tests cover default absence and opt-in scalar converged values.
 `python examples/scripts/validate_background_revision.py --help` also passes.
 No orbit model comparison was run.
 
+The WIC variance option has four passing focused tests. A broader group of 36
+loader, BS measurement-weighting, and validation-script tests passes after
+deselecting two pre-existing metadata tests. Those tests fail because the
+current committed loader no longer writes `excludes` and
+`reflattening_assumption`; this was not changed as part of the WIC option. A
+real 2000-08-28 WIC file also loaded successfully with both models; the
+correction-aware/reference variance ratio had 5th, 50th, and 95th percentiles
+of 1.02, 1.12, and 1.51.
+
+A focused compatibility check on the bundled 15-frame WIC sequence ran the
+revised variance-weighted BS fit, the existing SH fit, `Dataset.to_netcdf()`,
+and `xarray.load_dataset()` successfully. `img_variance`, all revised BS
+fields, `dgsolver_flag`, and the SH products survived the round trip. The SH
+stage remains scientifically unchanged: it normalizes with `dgsigma` and
+inherits `dgweight`, but does not apply `img_variance` as measurement
+precision. The result therefore confirms structural and serialization
+compatibility, not a fully variance-aware SH inversion.
+
+The first SH comparison script confirmed that the apparently unchanged image
+is primarily a display-scale issue: `shimg` equals `dgimg - shmodel` exactly,
+but the smooth SH correction is much smaller than the bright auroral range.
+For WIC at 2000-05-16 03:03:32, the SH correction was about 9.7% of the
+`dgimg` RMS and approximately -100 to +142 counts. The script's ordinary and
+"variance" SH rows are identical because `backgroundmodel_SH` silently
+ignores `variance=True` and other unknown BS-only keywords. A future SH API
+revision should validate keywords rather than silently accepting a comparison
+that did not occur.
+
+The August 28 WIC sequence exposed stronger SH shrinkage than the display
+alone suggested. Median `dgsigma` was about 341 counts and the equal-area bins
+held a median 129 pixels. SH used `1/N` as a row multiplier, so the normal
+equations applied `1/N^2` per pixel. The resulting data normal matrix had
+median diagonal `1.34e-5`, below the fixed `1e-4` damping, and only 5 of 90
+data eigenvalues exceeded the damping. The row multiplier is now corrected to
+`1/sqrt(N)`. BS and SH now both scale damping from their initial `GTG` and use
+`sqrt(Tukey)` as the robust row multiplier. The earlier fixed-damping sweep is
+therefore obsolete; complete-orbit comparison must select a dimensionless
+damping value.
+
 `pytest -q tests/test_background_asymmetric_legacy.py
 tests/test_background_dgsigma.py tests/test_background_spatial_weighting.py
 tests/test_background_dgsigma_freeze.py
@@ -154,6 +230,8 @@ identity, default width and knot anchors, a custom width, invalid widths, VIS
 rejection, preserved custom knots, and a combined revised-option fit.
 
 ## Next action
+
+Run the complete-orbit comparison and select dimensionless damping. Keep `sqrt(Tukey)` as the revised candidate and make comparison labels truthful; exact paper reproduction is not the development objective. Defer asymmetric-coordinate and residual-norm work.
 
 Mount the complete native-grid orbit data, generate and save the complete WIC
 orbit with pre-reflattening `img_variance`, then run the script with explicit
