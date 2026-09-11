@@ -1,5 +1,19 @@
 # Decision Log
 
+## 2026-09-11 - Extract one directional model from the experimental branch
+
+**Decision:** Preserve `2D_model` at `1556ff1` as the experimental record and
+start `background_model_asymmetry` from `background_model_revision` at
+`1f6492f`. Reimplement only `B0(x) + T(SZA)*S*Bs(x)`. Calculate and save both
+solar-view sine and cosine factors, although only the sine factor enters the
+fit. Expose the Spencer taper as an option.
+
+**Rationale:** The experimental branch contains many rejected model variants
+and supporting switches. Selective reimplementation retains the most
+promising directional correction without turning the revised production code
+into a generic model framework. The unused cosine factor remains valuable for
+visual inspection of the viewing geometry.
+
 ## 2026-09-03 — Attach detector variance during opt-in IDL loading
 
 **Decision:** Package unchanged copies of the FUVVIEW3 mission and flat-field

@@ -5,6 +5,7 @@ Created on Fri Sep 30 09:28:25 2022
 
 @author: aohma
 """
+from pathlib import Path
 import warnings
 
 import numpy as np
@@ -61,15 +62,42 @@ def _monotonic_bs_transform(n_scp, n_tcp):
     return transform
 
 
-def _solve_monotonic_bs(weighted_design, weighted_data, damping, n_scp, n_tcp, solver):
-    """Solve for spatially non-decreasing B-spline coefficients.
+def _monotonic_base_transform(n_base_scp, n_total_scp, n_tcp):
+    """Constrain only the leading one-dimensional base coefficients.
 
-    BVLS is allowed at most 1000 iterations. SciPy's ``result.success`` is the
-    convergence criterion; reaching the iteration limit is not interpreted
-    separately.
+    Coefficients after the base belong to the signed directional model and
+    remain free.
     """
 
-    transform = _monotonic_bs_transform(n_scp, n_tcp)
+    n_coefficients = n_total_scp*n_tcp
+    transform = np.eye(n_coefficients)
+    lower = np.full(n_coefficients, -np.inf)
+
+    for temporal in range(n_tcp):
+        baseline = temporal
+        for spatial in range(n_base_scp):
+            row = spatial*n_tcp + temporal
+            transform[row, :] = 0
+            transform[row, baseline] = 1
+
+            for increment in range(1, spatial + 1):
+                column = increment*n_tcp + temporal
+                transform[row, column] = 1
+                lower[column] = 0
+
+    return transform, lower
+
+
+def _solve_monotonic_bs(weighted_design, weighted_data, damping, n_scp, n_tcp, solver, transform=None, lower=None):
+    """Solve a B-spline fit using bounded transformed coefficients.
+
+    BVLS is allowed at most 1000 iterations. SciPy's ``result.success`` is the
+    convergence criterion. Without an explicit transform and bounds, every
+    spatial coefficient sequence is constrained to be non-decreasing.
+    """
+
+    if transform is None:
+        transform = _monotonic_bs_transform(n_scp, n_tcp)
     n_coefficients = transform.shape[0]
 
     if solver == 'full':
@@ -106,8 +134,9 @@ def _solve_monotonic_bs(weighted_design, weighted_data, damping, n_scp, n_tcp, s
             design = np.sqrt(eigenvalue)[:, None] * eigenvector.T
             data = np.linalg.lstsq(design.T, normal_data, rcond=None)[0]
 
-    lower = np.zeros(n_coefficients)
-    lower[:n_tcp] = -np.inf
+    if lower is None:
+        lower = np.zeros(n_coefficients)
+        lower[:n_tcp] = -np.inf
 
     try:
         result = lsq_linear(design, data, bounds=(lower, np.inf), method='bvls', max_iter=1000)
@@ -130,6 +159,20 @@ def _normal_matrix_scale(normal_matrix):
         raise ValueError("The weighted design matrix contains no supported coefficients")
 
     return np.median(supported)
+
+
+def _spencer_taper_weights(sza):
+    """Return the normalized spherical-Chapman profile used by Lompe.
+
+    The taper is interpolated in SZA and set to zero beyond the table's
+    120-degree limit. It limits directional freedom; it is not an IMAGE
+    brightness calibration.
+    """
+
+    sza = np.asarray(sza, dtype=float)
+    table = np.loadtxt(Path(__file__).parents[1]/'data'/'spencer_chapman_taper.txt')
+    weight = np.interp(sza, table[:, 0], table[:, 1], left=1, right=0)
+    return np.where(np.isfinite(sza), weight, np.nan)
 
 def backgroundmodel_BS(imgs,**kwargs):
     '''
@@ -160,6 +203,17 @@ def backgroundmodel_BS(imgs,**kwargs):
         Number of temporal knots, equally spaced between the endpoints. The default is 2 (only knots at endpoints)
     tOrder : int, optional
         Order of the temporal spline fit. The default is 2.
+    spatial_model : {'legacy', 'legacy_x_azimuth'}, optional
+        `legacy` fits the ordinary one-dimensional background. The
+        `legacy_x_azimuth` model adds a signed solar-view correction in the
+        same legacy coordinate. Default is `legacy`.
+    directional_x_knots : array like, optional
+        Spatial break points for the signed directional spline. By default it
+        uses the ordinary unpadded `sKnots`.
+    spencer_taper : bool, optional
+        If True, multiply the directional term by the normalized Spencer
+        spherical-Chapman profile. The base model is unchanged. Default is
+        False.
     noise_model : {'legacy', 'binned'}, optional
         Method used to estimate `dgsigma`. `legacy` reproduces the released
         pixel-expanded regression. `binned` fits one residual variance and
@@ -191,8 +245,8 @@ def backgroundmodel_BS(imgs,**kwargs):
         balance between the data and regularization.
     monotonic : bool, optional
         If True, constrain the fitted background to be non-decreasing with
-        the legacy coordinate `cos(SZA)/cos(DZA)`. The temporal spline remains
-        unchanged. Default is False.
+        the legacy coordinate `cos(SZA)/cos(DZA)`. For the directional model,
+        this constraint applies only to the base component. Default is False.
     monotonic_solver : {'normal', 'full'}, optional
         `normal` first reduces the weighted image rows to a small normal
         system and is the operational default. `full` applies the same bounds
@@ -230,6 +284,9 @@ def backgroundmodel_BS(imgs,**kwargs):
     sKnots = kwargs.pop('sKnots') if 'sKnots' in kwargs.keys() else None
     n_tKnots = kwargs.pop('n_tKnots') if 'n_tKnots' in kwargs.keys() else 2
     tOrder = kwargs.pop('tOrder') if 'tOrder' in kwargs.keys() else 2
+    spatial_model = kwargs.pop('spatial_model') if 'spatial_model' in kwargs.keys() else 'legacy'
+    directional_x_knots = kwargs.pop('directional_x_knots') if 'directional_x_knots' in kwargs.keys() else None
+    spencer_taper = bool(kwargs.pop('spencer_taper')) if 'spencer_taper' in kwargs.keys() else False
     noise_model = kwargs.pop('noise_model') if 'noise_model' in kwargs.keys() else 'legacy'
     spatial_weighting = kwargs.pop('spatial_weighting') if 'spatial_weighting' in kwargs.keys() else 'gaussian'
     asymmetric_legacy = bool(kwargs.pop('asymmetric_legacy')) if 'asymmetric_legacy' in kwargs.keys() else False
@@ -261,6 +318,15 @@ def backgroundmodel_BS(imgs,**kwargs):
     if spatial_weighting not in ['gaussian', 'bin_population']:
         raise ValueError("spatial_weighting must be 'gaussian' or 'bin_population'")
 
+    if spatial_model not in ['legacy', 'legacy_x_azimuth']:
+        raise ValueError("spatial_model must be 'legacy' or 'legacy_x_azimuth'")
+
+    directional_model = spatial_model == 'legacy_x_azimuth'
+    if directional_x_knots is not None and not directional_model:
+        raise ValueError("directional_x_knots is only available for spatial_model='legacy_x_azimuth'")
+    if spencer_taper and not directional_model:
+        raise ValueError("spencer_taper=True is only available for spatial_model='legacy_x_azimuth'")
+
     try:
         nightside_width = float(nightside_width)
     except (TypeError, ValueError):
@@ -281,21 +347,37 @@ def backgroundmodel_BS(imgs,**kwargs):
 
     # Spatial knots and viewing angle correction
     if imgs['id'] in ['WIC','SI12','SI13','UVI']:
-        fraction = np.cos(np.deg2rad(imgs['sza'].stack(z=('row','col')).values))/np.cos(np.deg2rad(imgs['dza'].stack(z=('row','col')).values))
+        sza = imgs['sza'].stack(z=('row','col')).values
+        fraction = np.cos(np.deg2rad(sza))/np.cos(np.deg2rad(imgs['dza'].stack(z=('row','col')).values))
         if asymmetric_legacy:
             fraction = _asymmetric_legacy_coordinate(fraction, nightside_width)
         if sKnots is None:
             sKnots = _asymmetric_legacy_knots(nightside_width) if asymmetric_legacy else [-3.5,-0.25,0,0.25,1.5,3.5]
     elif imgs['id'] == 'VIS':
+        if directional_model:
+            raise ValueError("spatial_model='legacy_x_azimuth' requires IMAGE/FUV viewing geometry")
         if asymmetric_legacy:
             raise ValueError("asymmetric_legacy requires the legacy FUV coordinate and is not available for VIS")
-        fraction = np.cos(np.deg2rad(imgs['sza'].stack(z=('row','col')).values))
+        sza = imgs['sza'].stack(z=('row','col')).values
+        fraction = np.cos(np.deg2rad(sza))
         if sKnots is None: sKnots= [-1,-0.1,0,0.1,0.4,1]
         if spatial_weighting == 'bin_population':
             raise ValueError("bin_population spatial weighting requires the legacy FUV coordinate")
         if monotonic:
             raise ValueError("monotonic fitting requires the legacy FUV coordinate")
-    sKnots = np.r_[np.repeat(sKnots[0],sOrder),sKnots, np.repeat(sKnots[-1],sOrder)]
+    base_breaks = np.asarray(sKnots, dtype=float)
+    sKnots = np.r_[np.repeat(base_breaks[0],sOrder),base_breaks, np.repeat(base_breaks[-1],sOrder)]
+
+    if directional_model:
+        if 'solar_view_sine_factor' not in imgs:
+            raise ValueError("spatial_model='legacy_x_azimuth' requires solar_view_sine_factor; load IDL files with viewing_geometry=True")
+
+        directional_x_breaks = base_breaks.copy() if directional_x_knots is None else np.asarray(directional_x_knots, dtype=float)
+        if directional_x_breaks.ndim != 1 or directional_x_breaks.size < 2 or np.any(~np.isfinite(directional_x_breaks)) or np.any(np.diff(directional_x_breaks) <= 0):
+            raise ValueError("directional_x_knots must be a finite, strictly increasing one-dimensional array")
+        directional_x_knots = np.r_[np.repeat(directional_x_breaks[0],sOrder),directional_x_breaks, np.repeat(directional_x_breaks[-1],sOrder)]
+        solar_view_sine = imgs['solar_view_sine_factor'].stack(z=('row','col')).values
+        directional_taper = _spencer_taper_weights(sza) if spencer_taper else np.ones_like(sza)
 
     # Minuets since first image
     time=(imgs['date'].values-imgs['date'].values[0])/ np.timedelta64(1, 'm')
@@ -314,16 +396,28 @@ def backgroundmodel_BS(imgs,**kwargs):
 
     # Number of control points
     n_tcp = len(tKnots)-tOrder-1
-    n_scp = len(sKnots)-sOrder-1
+    n_base_scp = len(sKnots)-sOrder-1
+    n_directional_scp = len(directional_x_knots)-sOrder-1 if directional_model else 0
+    n_scp = n_base_scp + n_directional_scp
 
     # Temporal design matix
     M = BSpline(tKnots, np.eye(n_tcp), tOrder)(time)
 
     # Spatial design matrix
     G_g=[]
+    G_base_g=[]
+    G_sine_g=[]
     G_s=[]
     for i in range(n_t):
-        G= BSpline(sKnots, np.eye(n_scp), sOrder)(fraction[i,:]) # Spatial design matirx
+        G_base = BSpline(sKnots, np.eye(n_base_scp), sOrder)(fraction[i,:])
+        if directional_model:
+            G_directional = BSpline(directional_x_knots, np.eye(n_directional_scp), sOrder)(fraction[i,:])
+            G_sine = G_directional*(directional_taper[i]*solar_view_sine[i])[:, None]
+            G = np.hstack([G_base, G_sine])
+            G_base_g.append(G_base)
+            G_sine_g.append(G_sine)
+        else:
+            G = G_base
         G_t = np.zeros((n_s, n_scp*n_tcp))
         for j in range(n_tcp):
             G_t[:, np.arange(j, n_scp*n_tcp, n_tcp)] = G*M[i, j]
@@ -333,7 +427,15 @@ def backgroundmodel_BS(imgs,**kwargs):
     G_s=np.vstack(G_s)
 
     # Index of data to use in model
-    fit_support = (imgs['sza'].stack(z=('row','col')).values >= 0) & (np.isfinite(imgs[inImg].stack(z=('row','col')).values)) & (fraction>sKnots[0]) & (fraction<sKnots[-1])
+    fit_support = (sza >= 0) & (np.isfinite(imgs[inImg].stack(z=('row','col')).values)) & (fraction>sKnots[0]) & (fraction<sKnots[-1])
+    if directional_model:
+        fit_support &= np.isfinite(solar_view_sine) & np.isfinite(directional_taper)
+        fit_support &= (fraction>directional_x_knots[0]) & (fraction<directional_x_knots[-1])
+
+    monotonic_transform = None
+    monotonic_lower = None
+    if monotonic and directional_model:
+        monotonic_transform, monotonic_lower = _monotonic_base_transform(n_base_scp, n_scp, n_tcp)
 
     # Spatial sampling weights
     if spatial_weighting == 'gaussian':
@@ -396,7 +498,7 @@ def backgroundmodel_BS(imgs,**kwargs):
 
         if use_monotonic:
             try:
-                m_s = _solve_monotonic_bs(weighted_design, weighted_data, R, n_scp, n_tcp, monotonic_solver)
+                m_s = _solve_monotonic_bs(weighted_design, weighted_data, R, n_scp, n_tcp, monotonic_solver, monotonic_transform, monotonic_lower)
             except RuntimeError as error:
                 if not monotonic_fallback:
                     raise
@@ -411,6 +513,9 @@ def backgroundmodel_BS(imgs,**kwargs):
             dm.append(G_g[i]@mNew[i, :])
 
         dm=np.array(dm).squeeze()
+        if directional_model:
+            dm_base = np.array([G_base_g[i]@mNew[i, :n_base_scp] for i in range(n_t)]).squeeze()
+            dm_sine = np.array([G_sine_g[i]@mNew[i, n_base_scp:] for i in range(n_t)]).squeeze()
         residuals = (d_s[ind] - dm.flatten()[ind])
 
         if iteration <= dgsigma_freeze_iteration:
@@ -438,6 +543,11 @@ def backgroundmodel_BS(imgs,**kwargs):
     imgs['dgnorm_residual'] = normR
     imgs['dgnorm_model'] = normM
     imgs['dgsolver_flag'] = solver_flag
+    if directional_model:
+        imgs['dgmodel_base'] = (['date','row','col'],dm_base.reshape((n_t,len(imgs.row),len(imgs.col))))
+        imgs['dgmodel_sine'] = (['date','row','col'],dm_sine.reshape((n_t,len(imgs.row),len(imgs.col))))
+        if spencer_taper:
+            imgs['spencer_taper_factor'] = (['date','row','col'],directional_taper.reshape((n_t,len(imgs.row),len(imgs.col))))
     if diagnostics:
         imgs['dgfit_iterations'] = iteration
         imgs['dgfit_converged'] = iteration < 100 and np.isfinite(diff) and diff <= stop
@@ -449,9 +559,15 @@ def backgroundmodel_BS(imgs,**kwargs):
     imgs['dgimg'] = xr.where(fit_support,imgs['dgimg'],np.nan)
     imgs['dgweight'] = xr.where(fit_support,imgs['dgweight'],np.nan)
     imgs['dgsigma'] = xr.where(fit_support,imgs['dgsigma'],np.nan)
+    if directional_model:
+        imgs['dgmodel_base'] = xr.where(fit_support,imgs['dgmodel_base'],np.nan)
+        imgs['dgmodel_sine'] = xr.where(fit_support,imgs['dgmodel_sine'],np.nan)
 
     # Add attributes
-    imgs['dgmodel'].attrs = {'long_name': 'BS model'}
+    monotonic_constraint = 'none'
+    if monotonic:
+        monotonic_constraint = 'legacy_base_nondecreasing' if directional_model else 'legacy_coordinate_nondecreasing'
+    imgs['dgmodel'].attrs = {'long_name': 'BS model', 'spatial_model': spatial_model, 'monotonic_constraint': monotonic_constraint}
     imgs['dgimg'].attrs = {'long_name': 'BS corrected image'}
     imgs['dgweight'].attrs = {'long_name': 'BS model weights'}
     imgs['dgsigma'].attrs = {'long_name': 'BS model spread'}
@@ -462,6 +578,13 @@ def backgroundmodel_BS(imgs,**kwargs):
         'flag_values': np.array([0, 1, 2], dtype=np.int8),
         'flag_meanings': 'standard_requested monotonic_succeeded monotonic_failed_standard_fallback'
     }
+    if directional_model:
+        imgs['dgmodel'].attrs['directional_x_knots'] = directional_x_breaks
+        imgs['dgmodel'].attrs['spencer_taper'] = 'enabled' if spencer_taper else 'disabled'
+        imgs['dgmodel_base'].attrs = {'long_name': 'Azimuth-independent legacy-coordinate background component'}
+        imgs['dgmodel_sine'].attrs = {'long_name': 'Sine-like solar-view directional background component'}
+        if spencer_taper:
+            imgs['spencer_taper_factor'].attrs = {'long_name': 'Normalized spherical-Chapman production factor', 'units': '1'}
     if diagnostics:
         imgs['dgfit_iterations'].attrs = {'long_name': 'Number of BS IRLS iterations'}
         imgs['dgfit_converged'].attrs = {'long_name': 'BS IRLS convergence status'}

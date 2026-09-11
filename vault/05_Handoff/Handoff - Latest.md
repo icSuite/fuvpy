@@ -1,9 +1,28 @@
 # Handoff - Latest
 
-Last updated: 2026-09-09
-Branch: `background_model_revision`
-Checkpoint: Steps 1 through 6 complete
-Validation: read-only code audit complete; repairs required before complete-orbit execution
+Last updated: 2026-09-11
+Branch: `background_model_asymmetry`
+Checkpoint: clean sine-only legacy-x directional model implemented
+Validation: 21 focused tests pass; complete suite has 100 passes and 3 known parent-branch failures
+
+## Directional implementation
+
+The plan in `vault/02_Algorithm/Directional Background Model Implementation
+Plan.md` is implemented through focused verification. The branch contains
+only the geometry calculation, both saved solar-view factors, optional
+Spencer taper, and sine-only legacy-x directional model. `2D_model` was not
+merged. The broad experimental evidence remains in
+`vault/03_Validation/2D Model Experiments - Summary.md`.
+
+The retained call is:
+
+```python
+backgroundmodel_BS(images, spatial_model="legacy_x_azimuth", directional_x_knots=[-3.5, 0, 1.5, 3.5], spencer_taper=True)
+```
+
+The next scientific task is to finish the comparison script and examine the
+ordinary and directional models on representative complete orbits. No
+complete orbit was processed during implementation.
 
 ## Audit checkpoint
 

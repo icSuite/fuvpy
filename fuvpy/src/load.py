@@ -17,8 +17,10 @@ from datetime import datetime
 from scipy.io import readsav
 
 from fuvpy.src.measurement_uncertainty import calibration_multiplier, si_measurement_variance, wic_measurement_variance
+from fuvpy.src.viewing_geometry import calculate_viewing_geometry
+from fuvpy.utils.sunlight import subsol
 
-def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True, measurement_variance=False, poisson_offset=0.0, wic_variance_model='reference'):
+def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True, measurement_variance=False, poisson_offset=0.0, wic_variance_model='reference', viewing_geometry=False):
     '''
     Load FUV images into a xarray.Dataset
 
@@ -50,6 +52,10 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
         coefficient by the reconstructed mission-gain and flat-field
         multiplier. Used only for WIC when ``measurement_variance=True``.
         Default is ``reference``.
+    viewing_geometry : bool, optional
+        If True, reconstruct and store the pole-safe solar-view cosine and
+        sine factors. The reconstructed DZA is checked against the DZA stored
+        by FUVVIEW3. Default is False.
 
     Returns
     -------
@@ -62,6 +68,9 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
     'glat': Geographic latitude of each pixel
     'glon': Geographic longitude of each pixel
     'dza': Satellite zenith angle (viewing angle) of each pixel
+    When ``viewing_geometry=True``:
+    'solar_view_cosine_factor': Horizontal solar-viewing dot product
+    'solar_view_sine_factor': Oriented horizontal solar-viewing cross product
     'sza': Solar zenith angle of each pixel
     'hemisphere': Hemisphere of the image
     'id': Short name of the detector
@@ -99,7 +108,8 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
         'dza': (['row','col'],imageinfo['dza'][0]),
         'sza': (['row','col'],imageinfo['sza'][0])
         })
-        img = img.expand_dims(date=[pd.to_datetime(_timestamp_idl(imageinfo['time'][0]))])
+        image_time = pd.to_datetime(_timestamp_idl(imageinfo['time'][0]))
+        img = img.expand_dims(date=[image_time])
 
         coordinates = ['mlat','mlon','mlt','glat','glon','sza','dza']
         fillvals = [-1e+31,-1e+31,-1e+31,-1e+31,-1e+31,-1,-1]
@@ -107,6 +117,36 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
         # Replace fill values with np.nan
         for coordinate,fillval in zip(coordinates, fillvals):
             img[coordinate] = xr.where(img[coordinate]==fillval,np.nan,img[coordinate])
+
+        # FUVVIEW3 stores the spacecraft radius in O_GCI and its Earth-fixed
+        # direction in LAT_CTR and LON_CTR. Reproducing the stored DZA checks
+        # that the reconstructed line of sight follows the same convention.
+        if viewing_geometry:
+            required_fields = ['o_gci', 'lat_ctr', 'lon_ctr', 'emis_hgt']
+            available_fields = imageinfo.dtype.names if hasattr(imageinfo, 'dtype') and imageinfo.dtype.names else imageinfo.keys()
+            available_fields = {field.lower() for field in available_fields}
+            missing_fields = [field.upper() for field in required_fields if field not in available_fields]
+            if missing_fields:
+                raise ValueError(f"Viewing geometry requires FUVVIEW3 field(s): {', '.join(missing_fields)}")
+
+            spacecraft_radius = np.linalg.norm(np.asarray(imageinfo['o_gci'][0], dtype=float))
+            spacecraft_latitude = float(imageinfo['lat_ctr'][0])
+            spacecraft_longitude = float(imageinfo['lon_ctr'][0])
+            emission_height = float(imageinfo['emis_hgt'][0])
+            subsolar_latitude, subsolar_longitude = subsol([image_time])
+            geometry = calculate_viewing_geometry(img['glat'].values, img['glon'].values, spacecraft_radius, spacecraft_latitude, spacecraft_longitude, emission_height, subsolar_latitude[0], subsolar_longitude[0])
+
+            valid_dza = np.isfinite(geometry['dza']) & np.isfinite(img['dza'].values) & (img['dza'].values >= 0)
+            if not np.any(valid_dza):
+                raise ValueError("Viewing geometry could not be validated because the frame contains no valid DZA pixels")
+
+            maximum_dza_error = np.max(np.abs(geometry['dza'][valid_dza] - img['dza'].values[valid_dza]))
+            if maximum_dza_error > 1e-3:
+                raise ValueError(f"Reconstructed viewing geometry disagrees with stored DZA by up to {maximum_dza_error:.4g} degrees")
+
+            img['solar_view_cosine_factor'] = (['date', 'row', 'col'], geometry['solar_view_cosine_factor'])
+            img['solar_view_sine_factor'] = (['date', 'row', 'col'], geometry['solar_view_sine_factor'])
+            coordinates.extend(['solar_view_cosine_factor', 'solar_view_sine_factor'])
 
         # Select hemisphere
         if hemisphere =='south' or (hemisphere is None and np.nanmedian(img['mlat'])<0):
@@ -151,6 +191,9 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
     imgs['glon'].attrs = {'long_name': 'Geographic longitude', 'units': 'deg'}
     imgs['sza'].attrs = {'long_name': 'Solar zenith angle', 'units': 'deg'}
     imgs['dza'].attrs = {'long_name': 'Viewing angle', 'units': 'deg'}
+    if viewing_geometry:
+        imgs['solar_view_cosine_factor'].attrs = {'long_name': 'Cosine-like solar-viewing azimuth factor', 'units': '1', 'definition': 'horizontal_solar dot horizontal_viewing'}
+        imgs['solar_view_sine_factor'].attrs = {'long_name': 'Sine-like solar-viewing azimuth factor', 'units': '1', 'definition': 'local_up dot (horizontal_solar cross horizontal_viewing)'}
 
     return imgs
 

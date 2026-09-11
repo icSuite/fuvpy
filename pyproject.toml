@@ -19,4 +19,4 @@ where = ["."]
 include = ["fuvpy*"]
 
 [tool.setuptools.package-data]
-fuvpy = ["data/calibration/*.idl", "data/calibration/*.sav"]
+fuvpy = ["data/calibration/*.idl", "data/calibration/*.sav", "data/*.txt"]

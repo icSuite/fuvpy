@@ -1,9 +1,42 @@
 # Current State
 
-Last reviewed: 2026-09-09
-Branch: `background_model_revision`
-Implementation status: Steps 1 through 6 complete
-Validation status: production audit repairs implemented; complete-orbit comparison remains
+Last reviewed: 2026-09-11
+Branch: `background_model_asymmetry`
+Implementation status: clean directional model implemented
+Validation status: focused verification complete; complete-orbit comparison remains
+
+## Directional-model extraction
+
+This branch starts from `background_model_revision` commit `1f6492f`. The
+experimental `2D_model` branch is preserved separately at `1556ff1` and will
+not be merged wholesale.
+
+The only directional model selected for clean implementation is
+`B0(x) + T(SZA)*S*Bs(x)`, where `x=cos(SZA)/cos(DZA)`, `S` is the pole-safe
+solar-view sine factor, and `T` is optionally the Spencer taper. Both the sine
+and cosine solar-view factors must be calculated and stored for visualization,
+although the cosine factor will not enter the fit. The implementation plan is
+in `vault/02_Algorithm/Directional Background Model Implementation Plan.md`.
+The evidence and rejected alternatives from `2D_model` are summarized in
+`vault/03_Validation/2D Model Experiments - Summary.md`.
+
+The clean implementation now provides:
+
+- `read_idl(..., viewing_geometry=True)`, which reconstructs DZA and stores
+  both pole-safe solar-view factors;
+- the packaged Spencer spherical-Chapman profile;
+- `spatial_model="legacy_x_azimuth"` with configurable
+  `directional_x_knots` and `spencer_taper`;
+- separate `dgmodel_base` and `dgmodel_sine` outputs; and
+- base-only monotonicity when `monotonic=True`.
+
+The combined model reuses the revised IRLS, binned `dgsigma`, spatial and
+measurement weighting, damping, convergence, and support masking. No
+base-first fitting sequence or discarded 2D model machinery was introduced.
+
+Twenty-one focused tests pass. The complete suite reports 100 passes and the
+same three pre-existing failures documented on the parent branch. No complete
+orbit has been run.
 
 ## Audit checkpoint
 
