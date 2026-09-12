@@ -1,9 +1,40 @@
 # Handoff - Latest
 
-Last updated: 2026-09-11
+Last updated: 2026-09-12
 Branch: `background_model_asymmetry`
 Checkpoint: clean sine-only legacy-x directional model implemented
 Validation: 21 focused tests pass; complete suite has 100 passes and 3 known parent-branch failures
+
+## Production boundary
+
+A production-readiness audit on 2026-09-12 found no new numerical defect in
+the selected directional BS path, but the complete IMAGE rerun must not start
+yet. The icBuilder orbit runner is still wired to the old configuration,
+dimensionless BS and SH damping remain unselected, complete-orbit BS-to-SH
+validation is missing, and the runner writes final files without atomic save
+or restart validation. `read_idl` also lacks the variance provenance fields
+required by the WIC validation script. See
+`vault/03_Validation/Production Readiness Audit - 2026-09-12.md`.
+
+## Historical comparison reference
+
+The large pre-revision orbit files are no longer needed inside the repository.
+Run `python examples/scripts/extract_legacy_background.py` to extract the four
+BS fields used by `compare_models.py` at the bundled IDL times. Compact WIC,
+SI12, and SI13 references are complete under `data/legacy_background/`; each
+contains all 58 example frames and the three files occupy about 28 MB total.
+
+`compare_models.py` selects the compact historical frames by exact timestamp
+and displays them as a separate row before the models fitted by the current
+code. This is the authoritative old-result comparison and avoids emulating
+the previous Tukey, damping, and noise-model implementation inside the revised
+solver.
+
+The old files were fitted to complete orbits, not the extracted example
+segments. In particular, orbit 968 used 326 frames spanning 14:00--01:09,
+while the current example has only three frames near 23:39. The old BS fit was
+unconstrained but happens to be monotonic in the displayed frames; absence of
+visible non-monotonicity is not evidence that a monotonic solver was used.
 
 ## Directional implementation
 
@@ -20,9 +51,10 @@ The retained call is:
 backgroundmodel_BS(images, spatial_model="legacy_x_azimuth", directional_x_knots=[-3.5, 0, 1.5, 3.5], spencer_taper=True)
 ```
 
-The next scientific task is to finish the comparison script and examine the
-ordinary and directional models on representative complete orbits. No
-complete orbit was processed during implementation.
+The next task is to repair the variance metadata and production runner, then
+examine the ordinary and directional models on 3--5 representative complete
+orbits through both BS and SH. No complete orbit was processed during
+implementation.
 
 ## Audit checkpoint
 

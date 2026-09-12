@@ -1,9 +1,40 @@
 # Current State
 
-Last reviewed: 2026-09-11
+Last reviewed: 2026-09-12
 Branch: `background_model_asymmetry`
 Implementation status: clean directional model implemented
 Validation status: focused verification complete; complete-orbit comparison remains
+
+## Production-readiness audit
+
+The 2026-09-12 audit found no new numerical defect in the selected directional
+BS path, but complete IMAGE processing must wait. The icBuilder orbit runner
+still calls the old loader and BS configuration, production damping has not
+been selected, the selected model has not been checked on complete orbits
+through SH, and the runner is not interruption-safe. The loader also omits
+variance provenance required by its own WIC validation path. Full findings are
+in `vault/03_Validation/Production Readiness Audit - 2026-09-12.md`.
+
+## Historical comparison data
+
+`examples/scripts/extract_legacy_background.py` now extracts only `dgmodel`,
+`dgimg`, `dgweight`, and `dgsigma` at the bundled IDL example times from the
+large historical orbit files in `~/Downloads/data`. The compressed references
+are stored under `data/legacy_background/` and loaded by
+`examples/scripts/compare_models.py` as the genuine historical result.
+
+WIC, SI12, and SI13 each contain all 58 example frames. The three compressed
+files occupy about 28 MB in total. The extraction script writes through a
+temporary file and replaces each compact reference only after saving succeeds.
+
+The historical BS fields were produced from complete northern-hemisphere
+orbits with `x=cos(SZA)/cos(DZA)`, cubic spatial splines at
+`[-3.5, -0.25, 0, 0.25, 1.5, 3.5]`, five quadratic temporal knots,
+`tukeyVal=5`, `stop=0.01`, and absolute `dampingVal=1e-3`. There was no
+monotonic constraint. Orbit 968 used 326 frames from 14:00 to 01:09; the
+bundled example contains only three frames at 23:37--23:41. The saved result
+can therefore be used as the genuine historical output, but it is not a
+same-input comparison with models refitted to the short example sequence.
 
 ## Directional-model extraction
 
@@ -188,7 +219,10 @@ both paths; the correction-aware/reference variance ratio had 5th, 50th, and
 
 ## Current boundary and next action
 
-Run the complete-orbit comparison and select dimensionless damping. Comparison labels should describe the branch algorithms truthfully. Defer asymmetric-coordinate and residual-norm work.
+Repair the variance metadata and production runner, then run a 3--5-orbit
+complete BS-to-SH pilot and select dimensionless BS and SH damping. Do not
+start complete IMAGE processing before that pilot is accepted. Defer
+asymmetric-coordinate and residual-norm work.
 
 No geometry models beyond the single opt-in asymmetric legacy transform,
 background covariance, or diagnostic histories are present on this branch.
