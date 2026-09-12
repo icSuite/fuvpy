@@ -2,18 +2,18 @@
 
 Last updated: 2026-09-12
 Branch: `background_model_asymmetry`
-Checkpoint: clean sine-only legacy-x directional model implemented
+Checkpoint: BS-only sine-directional model implemented; SH/SBS retired
 Validation: 21 focused tests pass; complete suite has 100 passes and 3 known parent-branch failures
 
 ## Production boundary
 
 A production-readiness audit on 2026-09-12 found no new numerical defect in
 the selected directional BS path, but the complete IMAGE rerun must not start
-yet. The icBuilder orbit runner is still wired to the old configuration,
-dimensionless BS and SH damping remain unselected, complete-orbit BS-to-SH
-validation is missing, and the runner writes final files without atomic save
-or restart validation. `read_idl` also lacks the variance provenance fields
-required by the WIC validation script. See
+yet. The icBuilder orbit runner is still wired to the old configuration and
+obsolete SH stage, dimensionless BS damping remains unselected, complete-orbit
+BS validation is missing, and the runner writes final files without atomic
+save or restart validation. `read_idl` also lacks the variance provenance
+fields required by the WIC validation script. See
 `vault/03_Validation/Production Readiness Audit - 2026-09-12.md`.
 
 ## Historical comparison reference
@@ -52,9 +52,15 @@ backgroundmodel_BS(images, spatial_model="legacy_x_azimuth", directional_x_knots
 ```
 
 The next task is to repair the variance metadata and production runner, then
-examine the ordinary and directional models on 3--5 representative complete
-orbits through both BS and SH. No complete orbit was processed during
-implementation.
+examine the ordinary and directional BS models on 3--5 representative complete
+orbits. No complete orbit was processed during implementation.
+
+## BS-only cleanup
+
+`backgroundmodel_SH()` and `backgroundmodel_SBS()` are removed from the source,
+public API, xarray accessor, utilities, and active examples. New processing
+ends at `backgroundmodel_BS()` and uses `dgimg`. Existing NetCDF files with SH
+variables can still be opened by xarray, but fuvpy no longer calculates them.
 
 ## Audit checkpoint
 
@@ -62,7 +68,7 @@ The 2026-09-09 BS audit is recorded in `vault/03_Validation/BS Code Audit - 2026
 
 The audit also established that the recent `sqrt(Tukey)` change is conventional IRLS but differs from the explicit `W**2` convention in Ohma et al. and the released implementation. Revised bin-population weighting and dimensionless damping likewise change the method. The validation script's `released` label is therefore not currently accurate.
 
-On 2026-09-10 the support mask and keyword handling were fixed. Historical `dzalim` and `minlat` keywords are retained only as warned compatibility arguments for the Ohma paper scripts. Both BS and SH now scale damping from numerically supported positive `GTG` diagonal entries, and the empirical BS `dgsigma` calculation uses `Tukey * spatial_multiplier**2`. Measurement variance remains excluded from `dgsigma` intentionally.
+On 2026-09-10 the support mask and keyword handling were fixed. Historical `dzalim` and `minlat` keywords are retained only as warned compatibility arguments for the Ohma paper scripts. BS now scales damping from numerically supported positive `GTG` diagonal entries, and the empirical `dgsigma` calculation uses `Tukey * spatial_multiplier**2`. Measurement variance remains excluded from `dgsigma` intentionally.
 
 ## Completed
 
@@ -126,13 +132,13 @@ row multipliers. Measurement variance is deliberately absent from both
 empirical dgsigma regressions and Tukey residual scaling. Fitted variance must
 be finite and strictly positive. The default remains unweighted.
 
-BS and SH now use dimensionless zeroth-order damping:
+BS uses dimensionless zeroth-order damping:
 `R=dampingVal*scale*I`, where `scale` is the median supported positive diagonal
 of the initial weighted normal matrix. It remains fixed while IRLS updates the Tukey weights. A
 uniform change in row precision therefore does not alter relative damping,
 but historical numeric `dampingVal` settings do not transfer directly.
 
-The stored Tukey fields remain conventional objective weights. Both fits use
+The stored Tukey fields remain conventional objective weights. The fit uses
 their square roots as row multipliers, so the least-squares objective contains
 the Tukey weight once rather than squaring it again. Spatial and measurement
 terms remain direct row multipliers.
@@ -187,8 +193,8 @@ explicitly disabled in the monotonic validation variant so a bounded-solver
 failure remains visible. Iteration count and convergence are supplied by the
 minimal opt-in `backgroundmodel_BS(..., diagnostics=True)` fields
 `dgfit_iterations` and `dgfit_converged`; neither field is returned by default.
-No diagnostic histories were added. The script does not run the SH model or
-change package defaults.
+No diagnostic histories were added. The script does not change package
+defaults.
 
 ## Verification
 
@@ -200,11 +206,9 @@ missing measurement-variance metadata.
 The revised Tukey and dimensionless-damping calculations pass 34 focused BS
 tests covering ordinary and monotonic solves, measurement and spatial weights,
 `dgsigma`, freeze behavior, and diagnostics. The new nonzero-damping test
-confirms invariance to a uniform measurement-precision scale. A synthetic
-BS-to-SH smoke test completed with finite SH output. A broader 76-test run had
-73 passes and three failures unrelated to these edits: two known missing
-measurement-variance metadata fields and the current experimental hard-coded
-asymmetric-knot override.
+confirms invariance to a uniform measurement-precision scale. The current full
+suite has 100 passes and three known failures: two missing measurement-variance
+metadata fields and the experimental hard-coded asymmetric-knot override.
 
 `pytest -q tests/test_background_dgsigma.py
 tests/test_background_spatial_weighting.py
@@ -241,35 +245,9 @@ real 2000-08-28 WIC file also loaded successfully with both models; the
 correction-aware/reference variance ratio had 5th, 50th, and 95th percentiles
 of 1.02, 1.12, and 1.51.
 
-A focused compatibility check on the bundled 15-frame WIC sequence ran the
-revised variance-weighted BS fit, the existing SH fit, `Dataset.to_netcdf()`,
-and `xarray.load_dataset()` successfully. `img_variance`, all revised BS
-fields, `dgsolver_flag`, and the SH products survived the round trip. The SH
-stage remains scientifically unchanged: it normalizes with `dgsigma` and
-inherits `dgweight`, but does not apply `img_variance` as measurement
-precision. The result therefore confirms structural and serialization
-compatibility, not a fully variance-aware SH inversion.
-
-The first SH comparison script confirmed that the apparently unchanged image
-is primarily a display-scale issue: `shimg` equals `dgimg - shmodel` exactly,
-but the smooth SH correction is much smaller than the bright auroral range.
-For WIC at 2000-05-16 03:03:32, the SH correction was about 9.7% of the
-`dgimg` RMS and approximately -100 to +142 counts. The script's ordinary and
-"variance" SH rows are identical because `backgroundmodel_SH` silently
-ignores `variance=True` and other unknown BS-only keywords. A future SH API
-revision should validate keywords rather than silently accepting a comparison
-that did not occur.
-
-The August 28 WIC sequence exposed stronger SH shrinkage than the display
-alone suggested. Median `dgsigma` was about 341 counts and the equal-area bins
-held a median 129 pixels. SH used `1/N` as a row multiplier, so the normal
-equations applied `1/N^2` per pixel. The resulting data normal matrix had
-median diagonal `1.34e-5`, below the fixed `1e-4` damping, and only 5 of 90
-data eigenvalues exceeded the damping. The row multiplier is now corrected to
-`1/sqrt(N)`. BS and SH now both scale damping from their initial `GTG` and use
-`sqrt(Tukey)` as the robust row multiplier. The earlier fixed-damping sweep is
-therefore obsolete; complete-orbit comparison must select a dimensionless
-damping value.
+Earlier SH compatibility and shrinkage findings remain available in the
+historical session and validation notes. They are no longer active development
+requirements because SH is not part of the selected architecture.
 
 `pytest -q tests/test_background_asymmetric_legacy.py
 tests/test_background_dgsigma.py tests/test_background_spatial_weighting.py

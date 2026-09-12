@@ -6,7 +6,7 @@
 tracks are:
 
 - IMAGE/Polar file loading and camera geometry;
-- B-spline dayglow and spherical-harmonic residual-background removal;
+- B-spline background removal with optional directional asymmetry;
 - auroral-boundary modelling; and
 - plotting and interactive inspection.
 
@@ -49,9 +49,8 @@ live notes when the task changes project understanding.
 - The final weights depend on the data. Any analytic covariance that freezes
   them is conditional on the converged IRLS solution and should be checked
   against repeated fits.
-- The WIC correction uses sequential BS and SH fits. Their errors are
-  dependent; do not add two separately estimated variances as if the stages
-  were independent.
+- The production correction uses only `backgroundmodel_BS`, with or without
+  the optional directional asymmetry.
 - Use complete image sequences for scientific validation of temporal spline
   fits. A few extracted frames do not reproduce a full-orbit fit.
 - Background-fit uncertainty can quantify sensitivity around the selected

@@ -17,11 +17,11 @@ long-run safety.
    viewing geometry, the directional model, Spencer taper, binned `dgsigma`,
    bin-population weighting, iteration-0 freezing, variance weighting,
    monotonicity, or diagnostics.
-2. Production dimensionless damping values have not been selected for either
-   BS or SH. Historical numeric values do not retain their old meaning after
+2. Production dimensionless BS damping has not been selected. Historical
+   numeric values do not retain their old meaning after
    scaling regularization by the initial weighted normal matrix.
 3. The selected model has not been evaluated on complete representative
-   orbits through the full BS -> SH -> NetCDF round trip. Short example
+   orbits through the full BS -> NetCDF round trip. Short example
    sequences do not reproduce the temporal spline or WIC reflattening of a
    complete orbit.
 4. The icBuilder runner writes directly to final NetCDF paths, does not verify
@@ -39,9 +39,7 @@ long-run safety.
 - Choose a monotonic-failure policy. If ordinary fallback is enabled, correct
   the `monotonic_constraint` metadata when the saved result is no longer
   monotonic.
-- Record the actual BS and SH configuration in each output file.
-- Add SH convergence diagnostics rather than relying only on a printed
-  warning at the iteration limit.
+- Record the actual BS configuration in each output file.
 
 ## Known non-blockers
 
@@ -66,7 +64,7 @@ long-run safety.
 
 ## Next action
 
-Repair the metadata and production runner, then process 3--5 complete
-representative orbits through BS, SH, save, and reload. Inspect convergence,
-solver flags, scientific fields, runtime, and memory; select BS and SH damping
-before launching the complete corpus.
+Repair the metadata and production runner, remove its obsolete SH stage, then
+process 3--5 complete representative orbits through BS, save, and reload.
+Inspect convergence, solver flags, scientific fields, runtime, and memory;
+select BS damping before launching the complete corpus.

@@ -1,8 +1,11 @@
 # Background Fit Uncertainty Architecture
 
-Last reviewed: 2026-09-07
-Status: experimental implementation and complete-orbit validation through
-Phase 5; detector observation variance remains unresolved
+Last reviewed: 2026-09-12
+Status: superseded for SH/SBS; BS uncertainty material remains historical
+
+> Scope update: active fuvpy development now uses only
+> `backgroundmodel_BS()`. The SH and SBS sections below document earlier
+> experiments and are not part of the maintained processing architecture.
 
 ## Implementation checkpoint
 

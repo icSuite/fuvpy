@@ -35,7 +35,7 @@ def fig1(img,**kwargs):
 
 
     # Set keyword arguments to input or default values    
-    inImg = kwargs.pop('inImg') if 'inImg' in kwargs.keys() else 'shimg'
+    inImg = kwargs.pop('inImg') if 'inImg' in kwargs.keys() else 'dgimg'
     lims = kwargs.pop('lims') if 'lims' in kwargs.keys() else np.arange(50,201,5)
     sigma = kwargs.pop('sigma') if 'sigma' in kwargs.keys() else 300
     height = kwargs.pop('height') if 'height' in kwargs.keys() else 130
@@ -150,7 +150,7 @@ def fig1(img,**kwargs):
     
     # Corr
     pax = pp(plt.subplot(gs[:,1:]),minlat=minlat)
-    fuv.plotimg(img,'shimg',pax=pax,crange=(0,500),cmap='Greens')
+    fuv.plotimg(img,'dgimg',pax=pax,crange=(0,500),cmap='Greens')
     cbaxes = pax.ax.inset_axes([.3,.0,.4,.017]) 
     cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal',extend='both')
     cb.set_label('Intensity [counts]')
@@ -224,7 +224,7 @@ def fig2(wic,bi,bf,outpath):
             ## WIC ##
             t= 4*i+j
             pax = pp(plt.subplot(gs[i,j]),minlat=50)
-            fuv.plotimg(wic.isel(date=t),'shimg',pax=pax,crange=(0,1000),cmap='Greens')
+            fuv.plotimg(wic.isel(date=t),'dgimg',pax=pax,crange=(0,1000),cmap='Greens')
             pax.scatter(bi.isel(date=t)['pb'].values,np.tile(bi.mlt.values,(len(bi.lim),1)).T,s=2,color='C6')
             pax.scatter(bi.isel(date=t)['eb'].values,np.tile(bi.mlt.values,(len(bi.lim),1)).T,s=2,color='C9')
             pax.plot(bf.isel(date=t)['pb'].values,bf.mlt.values,color='C3')

@@ -24,7 +24,7 @@ def detect_boundaries(imgs,**kwargs):
     imgs : xarray.Dataset
         Dataset with the FUV images.
     inImg : str, optional
-        Name of the image to use in the determination. The default is 'shimg'.
+        Name of the image to use in the determination. The default is 'dgimg'.
     lims : array_like, optional
         Count limits to detect boundaries. Default is np.arange(50,201,5)
     sigma : float, optional
@@ -46,7 +46,7 @@ def detect_boundaries(imgs,**kwargs):
     if len(imgs.sizes)==2: imgs = imgs.expand_dims('date')
 
     # Set keyword arguments to input or default values    
-    inImg = kwargs.pop('inImg') if 'inImg' in kwargs.keys() else 'shimg'
+    inImg = kwargs.pop('inImg') if 'inImg' in kwargs.keys() else 'dgimg'
     lims = kwargs.pop('lims') if 'lims' in kwargs.keys() else np.arange(50,201,5)
     sigma = kwargs.pop('sigma') if 'sigma' in kwargs.keys() else 300
     height = kwargs.pop('height') if 'height' in kwargs.keys() else 130

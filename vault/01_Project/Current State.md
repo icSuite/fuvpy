@@ -2,18 +2,27 @@
 
 Last reviewed: 2026-09-12
 Branch: `background_model_asymmetry`
-Implementation status: clean directional model implemented
+Implementation status: BS-only directional model implemented; SH/SBS retired
 Validation status: focused verification complete; complete-orbit comparison remains
 
 ## Production-readiness audit
 
 The 2026-09-12 audit found no new numerical defect in the selected directional
 BS path, but complete IMAGE processing must wait. The icBuilder orbit runner
-still calls the old loader and BS configuration, production damping has not
-been selected, the selected model has not been checked on complete orbits
-through SH, and the runner is not interruption-safe. The loader also omits
-variance provenance required by its own WIC validation path. Full findings are
-in `vault/03_Validation/Production Readiness Audit - 2026-09-12.md`.
+still calls the old loader and obsolete SH stage, production BS damping has
+not been selected, the selected model has not been checked on complete orbits,
+and the runner is not interruption-safe. The loader also omits variance
+provenance required by its own WIC validation path. Full findings are in
+`vault/03_Validation/Production Readiness Audit - 2026-09-12.md`.
+
+## BS-only architecture
+
+`backgroundmodel_SH()` and `backgroundmodel_SBS()` have been removed together
+with their dedicated helper, spherical-harmonic utility, accessor/export
+paths, and active examples. The maintained background-removal path is now
+`backgroundmodel_BS()` with optional directional asymmetry, and the corrected
+image is `dgimg`. Historical NetCDF files containing SH fields remain readable,
+but fuvpy no longer creates those fields.
 
 ## Historical comparison data
 
@@ -75,7 +84,7 @@ The 2026-09-09 read-only audit found that the core tensor-product spline design 
 
 The audit also corrected the interpretation of the recent Tukey change. Using `sqrt(Tukey)` as the row multiplier is conventional IRLS, but the Ohma paper and released implementation explicitly use the Tukey value itself inside a formulation with `W**2`. The new behavior is therefore a method revision, not an unambiguous bug fix. The same distinction applies to revised `1/sqrt(N)` bin-population weighting and dimensionless damping. Paper, later-package, and revised configurations must be made separately reproducible.
 
-Full findings and the repair order are in `vault/03_Validation/BS Code Audit - 2026-09-09.md`. On 2026-09-10 the user clarified that improvement, not exact reproduction, is the objective. The conventional `sqrt(Tukey)` formulation remains the revised candidate. The production support-mask and keyword defects were fixed, the BS/SH damping scale was made robust to unsupported columns, and `dgsigma` now uses the squared spatial row multiplier. Asymmetric-coordinate and residual-norm work are deferred.
+Full findings and the repair order are in `vault/03_Validation/BS Code Audit - 2026-09-09.md`. On 2026-09-10 the user clarified that improvement, not exact reproduction, is the objective. The conventional `sqrt(Tukey)` formulation remains the revised candidate. The production support-mask and keyword defects were fixed, the BS damping scale was made robust to unsupported columns, and `dgsigma` now uses the squared spatial row multiplier. Asymmetric-coordinate and residual-norm work are deferred.
 
 ## Confirmed implementation
 
@@ -130,7 +139,7 @@ Full findings and the repair order are in `vault/03_Validation/BS Code Audit - 2
   separate and visible. Empirical `dgsigma` and Tukey residual scaling do not
   use measurement variance.
 - Measurement variance must be finite and strictly positive at every fitted
-  pixel. BS and SH now scale zeroth-order damping as
+  pixel. BS scales zeroth-order damping as
   `dampingVal` times the median supported positive diagonal of the initial
   weighted normal matrix, freezing that scale through IRLS. A uniform change in row precision
   therefore no longer changes the relative damping strength. The numerical
@@ -184,8 +193,7 @@ The revised Tukey and damping calculations pass 34 focused BS tests, including
 ordinary and monotonic paths, measurement weighting, spatial weighting,
 `dgsigma`, freeze behavior, and diagnostics. A constant measurement variance
 with nonzero dimensionless damping reproduces the unweighted result, confirming
-that the initial-`GTG` scale removes arbitrary global precision scaling. A
-small synthetic BS-to-SH smoke test also completed with finite SH output.
+that the initial-`GTG` scale removes arbitrary global precision scaling.
 
 The focused implementation and script-helper tests pass 59 tests. They cover the
 dgsigma bin structure, known variance relation, and population invariance,
@@ -219,10 +227,10 @@ both paths; the correction-aware/reference variance ratio had 5th, 50th, and
 
 ## Current boundary and next action
 
-Repair the variance metadata and production runner, then run a 3--5-orbit
-complete BS-to-SH pilot and select dimensionless BS and SH damping. Do not
-start complete IMAGE processing before that pilot is accepted. Defer
-asymmetric-coordinate and residual-norm work.
+Repair the variance metadata and update the production runner to use the
+BS-only path, then run a 3--5-orbit complete BS pilot and select dimensionless
+BS damping. Do not start complete IMAGE processing before that pilot is
+accepted. Defer asymmetric-coordinate and residual-norm work.
 
 No geometry models beyond the single opt-in asymmetric legacy transform,
 background covariance, or diagnostic histories are present on this branch.
@@ -230,35 +238,5 @@ Complete-orbit validation is deliberately deferred until the audit defects and
 reference configurations are repaired. Package defaults must not be changed
 on the basis of the current comparisons.
 
-The revised BS output remains structurally compatible with
-`backgroundmodel_SH`: the SH stage consumes `dgimg`, `dgsigma`, and
-`dgweight` with their existing dimensions and units. A focused run through
-BS, SH, NetCDF writing, and NetCDF loading succeeded on the bundled 15-frame
-WIC sequence, preserving the revised BS fields and the SH products. This is
-only structural compatibility. The SH inversion still uses `dgsigma` and the
-inherited BS Tukey weights; it preserves but does not use `img_variance`, so
-the complete BS-to-SH chain is not yet explicitly measurement-variance
-weighted.
-
-The initial SH visualization check also confirmed that `shimg` is exactly
-`dgimg - shmodel`. In the inspected WIC frame at 2000-05-16 03:03:32, the SH
-correction had about 9.7% of the RMS magnitude of `dgimg` and ranged from
-roughly -100 to +142 counts while bright corrected pixels reached several
-thousand counts. It is consequently difficult to see on a colour scale set by
-the aurora. `backgroundmodel_SH` currently ignores unrecognized keyword
-arguments, including the provisional `variance=True`; comparisons using that
-argument therefore repeat the ordinary SH calculation rather than testing a
-variance-aware version.
-
-An August 28 WIC diagnosis explains why the SH correction was small. The
-revised BS result had median `dgsigma` about 341 counts. The SH equal-area bins
-contained a median 129 pixels, but the code used `1/N` as a row multiplier and
-then formed normal equations, making its objective contribution `1/N^2` per
-pixel rather than `1/N`. The first SH data normal matrix had median diagonal
-`1.34e-5`, while the configured damping added `1e-4` to every diagonal; only 5
-of 90 data eigenvalues exceeded the damping. The SH row multiplier is now
-corrected to `1/sqrt(N)`, giving every populated bin equal total squared
-influence. Both SH and BS now use dimensionless initial-`GTG` damping and
-apply `sqrt(Tukey)` as the robust row multiplier. The earlier damping sweep
-used the previous fixed absolute damping and is no longer a tuning guide for
-the revised dimensionless parameter. No production damping has been selected.
+Earlier SH diagnostics are retained in historical session and validation
+notes, but no longer define active implementation work.

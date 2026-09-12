@@ -1,7 +1,11 @@
 # Background Uncertainty Frozen Mean Pipeline
 
-Last reviewed: 2026-09-02
-Status: Step 1 complete
+Last reviewed: 2026-09-12
+Status: superseded by the BS-only architecture
+
+> Historical note: this frozen experiment used the former BS-to-SH chain.
+> Active fuvpy development now ends at `backgroundmodel_BS()` and uses
+> `dgimg`. The configuration below is retained only to document the old test.
 
 ## Purpose
 
@@ -196,4 +200,3 @@ Two limitations must remain visible:
    architecture is detector-first; and
 2. the Zhang--Paxton lookup is incompatible with the current WIC grid and
    cannot be propagated in Step 6 without a separately verified resolution.
-

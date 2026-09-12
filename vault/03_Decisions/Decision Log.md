@@ -1,5 +1,19 @@
 # Decision Log
 
+## 2026-09-12 — Retire the SH and SBS background paths
+
+**Decision:** The active fuvpy background-removal architecture consists only
+of `backgroundmodel_BS()`, with optional directional asymmetry. Remove
+`backgroundmodel_SH()`, `backgroundmodel_SBS()`, their dedicated helper and
+utility code, and their public accessor/export paths. New corrected-image
+workflows use `dgimg`; historical files containing `shimg` remain readable as
+ordinary xarray datasets.
+
+**Rationale:** Neither the secondary spherical-harmonic correction nor the
+alternative SBS model belongs to the selected production architecture.
+Removing them makes the scientific processing path explicit and prevents
+obsolete stages from being invoked accidentally.
+
 ## 2026-09-11 - Extract one directional model from the experimental branch
 
 **Decision:** Preserve `2D_model` at `1556ff1` as the experimental record and

@@ -63,7 +63,6 @@ def background_removal(orbits,orbitpath,wicpath,outpath):
             wic = fuv.read_idl((files['path']+files['wicfile']).tolist(),dzalim=75) # Load
             wic = wic.sel(date=wic.hemisphere.date[wic.hemisphere=='north']) # Remove SH
             wic = fuv.backgroundmodel_BS(wic,sKnots=[-3.5,-0.25,0,0.25,1.5,3.5],stop=0.01,n_tKnots=5,tukeyVal=5,dampingVal=1e-3)
-            wic = fuv.backgroundmodel_SH(wic,4,4,n_tKnots=5,stop=0.01,tukeyVal=5,dampingVal=1e-4)
             wic.to_netcdf(outpath+'wic_or'+str(orbit).zfill(4)+'.nc')
         except Exception as e: print(e)
 
@@ -131,7 +130,7 @@ def intensities(wic,bm):
     '''
 
     bm=bm.reset_index().set_index('date')
-    wic['shimg'].attrs = {'long_name': 'Counts', 'units': ''}
+    wic['dgimg'].attrs = {'long_name': 'Counts', 'units': ''}
 
     a = (bm.mlt.values - 6.)/12.*np.pi
 
@@ -178,12 +177,12 @@ def intensities(wic,bm):
         # Identify gridcell with center inside the EB polygon
         incap = poly.contains_points(np.stack((wic.sel(date=t).x.values.flatten(),wic.sel(date=t).y.values.flatten()),axis=1))
 
-        P_mean.append(np.nanmean(wic.sel(date=t)['shimg'].values.flatten()[inpb]))
-        P_std.append(np.nanstd(wic.sel(date=t)['shimg'].values.flatten()[inpb]))
-        A_mean.append(np.nanmean(wic.sel(date=t)['shimg'].values.flatten()[ineb & ~inpb]))
-        A_std.append(np.nanstd(wic.sel(date=t)['shimg'].values.flatten()[ineb & ~inpb]))
-        S_mean.append(np.nanmean(wic.sel(date=t)['shimg'].values.flatten()[incap & ~ineb]))
-        S_std.append(np.nanstd(wic.sel(date=t)['shimg'].values.flatten()[incap & ~ineb]))
+        P_mean.append(np.nanmean(wic.sel(date=t)['dgimg'].values.flatten()[inpb]))
+        P_std.append(np.nanstd(wic.sel(date=t)['dgimg'].values.flatten()[inpb]))
+        A_mean.append(np.nanmean(wic.sel(date=t)['dgimg'].values.flatten()[ineb & ~inpb]))
+        A_std.append(np.nanstd(wic.sel(date=t)['dgimg'].values.flatten()[ineb & ~inpb]))
+        S_mean.append(np.nanmean(wic.sel(date=t)['dgimg'].values.flatten()[incap & ~ineb]))
+        S_std.append(np.nanstd(wic.sel(date=t)['dgimg'].values.flatten()[incap & ~ineb]))
       
 
     # ADD TO BM
@@ -282,7 +281,7 @@ def makeGIFs(orbits,wicpath,bpath,outpath,tempdir='temp'):
     for orbit in orbits:
         try:
             wic = xr.load_dataset(wicpath+'wic_or'+str(orbit).zfill(4)+'.nc')
-            wic['shimg'].attrs = {'long_name': 'Counts', 'units': ''}
+            wic['dgimg'].attrs = {'long_name': 'Counts', 'units': ''}
 
             bi = pd.read_hdf(bpath+'initial_boundaries.h5',key='initial',where='orbit=="{}"'.format(orbit))
             bf = pd.read_hdf(bpath+'final_boundaries.h5',key='final',where='orbit=="{}"'.format(orbit))
@@ -296,7 +295,7 @@ def makeGIFs(orbits,wicpath,bpath,outpath,tempdir='temp'):
                 pax = pp(ax,minlat=minlat)
                 ax.set_title('Orbit: '+str(orbit).zfill(4)+'   '+t.dt.strftime('%Y-%m-%d').values.tolist()+' '+t.dt.strftime('%H:%M:%S').values.tolist())
 
-                pax.scatter(wic.sel(date=t)['mlat'].values,wic.sel(date=t)['mlt'].values,c=wic.sel(date=t)['shimg'].values,s=2,alpha=0.5,vmin=0,vmax=500,cmap='Greens')
+                pax.scatter(wic.sel(date=t)['mlat'].values,wic.sel(date=t)['mlt'].values,c=wic.sel(date=t)['dgimg'].values,s=2,alpha=0.5,vmin=0,vmax=500,cmap='Greens')
                 try:
                     # Quality flags
                     ind0 = bf.loc[t.values,'isglobal'].all()
@@ -387,7 +386,7 @@ def makeGIFs2(corenumber):
     for orbit in orbits:
         try:
             wic = xr.load_dataset(wicpath+'wic_or'+str(orbit).zfill(4)+'.nc')
-            wic['shimg'].attrs = {'long_name': 'Counts', 'units': ''}
+            wic['dgimg'].attrs = {'long_name': 'Counts', 'units': ''}
 
             bi = pd.read_hdf(bpath+'detected_boundaries.h5',key='initial',where='orbit=="{}"'.format(orbit))
             bf = pd.read_hdf(bpath+'modeled_boundaries.h5',key='final',where='orbit=="{}"'.format(orbit))
@@ -401,7 +400,7 @@ def makeGIFs2(corenumber):
                 pax = pp(ax,minlat=minlat)
                 ax.set_title('Orbit: '+str(orbit).zfill(4)+'   '+t.dt.strftime('%Y-%m-%d').values.tolist()+' '+t.dt.strftime('%H:%M:%S').values.tolist())
 
-                pax.scatter(wic.sel(date=t)['mlat'].values,wic.sel(date=t)['mlt'].values,c=wic.sel(date=t)['shimg'].values,s=2,alpha=0.5,vmin=0,vmax=500,cmap='Greens')
+                pax.scatter(wic.sel(date=t)['mlat'].values,wic.sel(date=t)['mlt'].values,c=wic.sel(date=t)['dgimg'].values,s=2,alpha=0.5,vmin=0,vmax=500,cmap='Greens')
                 try:
                     # Quality flags
                     ind0 = bf.loc[t.values,'isglobal'].all()

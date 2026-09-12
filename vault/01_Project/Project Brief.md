@@ -1,6 +1,6 @@
 # Project Brief
 
-Last reviewed: 2026-09-01
+Last reviewed: 2026-09-12
 
 ## Purpose
 
@@ -9,26 +9,23 @@ IMAGE/FUV and Polar/UVI products into xarray datasets, fits and removes
 background emissions, models auroral boundaries, and provides plotting and
 inspection tools.
 
-The `background_uncertainty` branch has one additional purpose: estimate the
-uncertainty introduced by the fitted background removal so downstream IMAGE
-products can propagate it through sensor coregistration, precipitation, and
-conductance.
+The `background_model_asymmetry` branch develops the revised BS background
+model and its optional directional correction for downstream IMAGE products.
 
 ## Scope
 
 The repository contains:
 
 - file loading and WIC reflattening in `fuvpy/src/load.py`;
-- dayglow and residual-background models in `fuvpy/src/background.py`;
+- the B-spline background model in `fuvpy/src/background.py`;
 - auroral-boundary models in `fuvpy/src/boundaries.py`;
 - xarray accessors and plotting helpers;
-- utilities for spherical harmonics, sunlight, coordinates, dates, and oval
-  models; and
+- utilities for sunlight, coordinates, dates, and oval models; and
 - notebooks, scripts, figures, and a small WIC example sequence.
 
-The uncertainty work is limited initially to the existing BS and SH background
-fits. It does not redesign the mean background model, calibrate the cameras,
-or choose the production electron-energy method in icBuilder.
+The background work is limited to `backgroundmodel_BS`, with or without its
+directional asymmetry. It does not calibrate the cameras or choose the
+production electron-energy method in icBuilder.
 
 ## Downstream role
 

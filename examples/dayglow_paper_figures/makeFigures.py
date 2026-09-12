@@ -40,19 +40,16 @@ def runEvent(inpath):
     '''
     wic = xr.load_dataset(inpath + 'wic.nc')
     wic = fuv.backgroundmodel_BS(wic,sKnots=[-3.5,-0.25,0,0.25,1.5,3.5],stop=0.01,n_tKnots=5,minlat=-90,tukeyVal=5,dzalim=75,dampingVal=1e-2)
-    wic = fuv.backgroundmodel_SH(wic,4,4,n_tKnots=5,stop=0.01,tukeyVal=5,dampingVal=1e-4)
     
     s12 = xr.load_dataset(inpath + 's12.nc')
     s12 = fuv.backgroundmodel_BS(s12,sKnots=[-3.5,-0.25,0,0.25,1.5,3.5],stop=0.01,n_tKnots=5,minlat=-90,tukeyVal=5,dzalim=75,dampingVal=1e-1)
-    s12 = fuv.backgroundmodel_SH(s12,4,4,n_tKnots=5,stop=0.01,tukeyVal=5,dampingVal=1e1)
     
     s13 = xr.load_dataset(inpath + 's13.nc')
     s13 = fuv.backgroundmodel_BS(s13,sKnots=[-3.5,-0.25,0,0.25,1.5,3.5],stop=0.01,n_tKnots=5,minlat=-90,tukeyVal=5,dzalim=75,dampingVal=1e-1)
-    s13 = fuv.backgroundmodel_SH(s13,4,4,n_tKnots=5,stop=0.01,tukeyVal=5,dampingVal=1e1)
     
     return wic,s12,s13
 
-def lcurve(imgs,model='BS'):
+def lcurve(imgs):
     '''
     L-curve analysis on the images.
 
@@ -60,10 +57,6 @@ def lcurve(imgs,model='BS'):
     ----------
     imgs : xr.Dataset
         Dataset with the images
-    model : str, optional
-        Which model to do the analysis on ('BS' or 'SH'). The default is 'BS'.
-        Note that 'SH' only works on datasets where the BS model have already been applied.
-
     Returns
     -------
     norms : array
@@ -75,10 +68,7 @@ def lcurve(imgs,model='BS'):
     
     norms = []
     for i in range(len(L0s)):
-        if model == 'BS':
-            temp=fuv.makeBSmodel(imgs,sKnots=[-3.5,-0.25,0,0.25,1.5,3.5],stop=0.01,n_tKnots=5,minlat=-90,tukeyVal=5,dzalim=75,dampingVal=L0s[i])[['dgnorm_residual','dgnorm_model']].to_array().values
-        elif model == 'SH':
-            temp=fuv.makeSHmodel(imgs,4,4,n_tKnots=5,stop=0.01,tukeyVal=5,dampingVal=L0s[i])[['shnorm_residual','shnorm_model']].to_array().values
+        temp=fuv.backgroundmodel_BS(imgs,sKnots=[-3.5,-0.25,0,0.25,1.5,3.5],stop=0.01,n_tKnots=5,minlat=-90,tukeyVal=5,dzalim=75,dampingVal=L0s[i])[['dgnorm_residual','dgnorm_model']].to_array().values
         norms.append(temp)
     
     return np.array(norms)
@@ -634,177 +624,3 @@ def makeFig5(wic,s12,s13,idate,outpath):
     plt.clf()
     plt.close()
 
-def makeFig6(wic,s12,s13,idate,outpath):
-    ''' 
-    Plot SH model overview for all cameras
-    
-    wic,s12,s13 : xarray.Dataset
-        Datasets with the FUV images
-    idate : int
-        Index tof date to be displayed
-    outpath : str
-        Path to where the figure is saved.
-    
-    '''
-    wic = wic.isel(date=idate).copy()
-    s12 = s12.isel(date=idate).copy()
-    s13 = s13.isel(date=idate).copy()
-    
-    fig = plt.figure(figsize=(11,9))
-
-    gs = gridspec.GridSpec(nrows=3,ncols=4,hspace=0.3,wspace=0.01)
-    
-    ## WIC ##
-    pax = pp(plt.subplot(gs[0,0]),minlat=50)
-    fuv.plotimg(wic,'dgimg',pax=pax,crange=(-1000,1000),cmap='coolwarm')
-    cbaxes = pax.ax.inset_axes([.2,.0,.6,.03]) 
-    cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal',extend='both')
-    cb.set_label('BS corrected image [counts]')
-    pax.ax.set_title('WIC',rotation='vertical',x=-0.03,y=0.45,verticalalignment='center',horizontalalignment='center')
-    pax.write(50,  6, '06',verticalalignment='center',horizontalalignment='left',fontsize=8)
-    pax.write(50, 12, '12',verticalalignment='bottom',horizontalalignment='center',fontsize=8)
-    pax.write(50, 18, '18',verticalalignment='center',horizontalalignment='right',fontsize=8)
-    pax.write(50, 9, '50',verticalalignment='center',horizontalalignment='center',fontsize=8)
-    
-    # Dayglow
-    pax = pp(plt.subplot(gs[0,1]),minlat=50)
-    fuv.plotimg(wic,'shmodel',pax=pax,crange=(-1000,1000),cmap='coolwarm')
-    cbaxes = pax.ax.inset_axes([.2,.0,.6,.03]) 
-    cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal',extend='both')
-    cb.set_label('SH model [counts]')
-    pax.write(50,  6, '06',verticalalignment='center',horizontalalignment='left',fontsize=8)
-    pax.write(50, 12, '12',verticalalignment='bottom',horizontalalignment='center',fontsize=8)
-    pax.write(50, 18, '18',verticalalignment='center',horizontalalignment='right',fontsize=8)
-    pax.write(50, 9, '50',verticalalignment='center',horizontalalignment='center',fontsize=8)
-    
-    # Corr
-    pax = pp(plt.subplot(gs[0,2]),minlat=50)
-    fuv.plotimg(wic,'shimg',pax=pax,crange=(-1000,1000),cmap='coolwarm')
-    cbaxes = pax.ax.inset_axes([.2,.0,.6,.03]) 
-    cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal',extend='both')
-    cb.set_label('SH corrected image [counts]')
-    pax.write(50,  6, '06',verticalalignment='center',horizontalalignment='left',fontsize=8)
-    pax.write(50, 12, '12',verticalalignment='bottom',horizontalalignment='center',fontsize=8)
-    pax.write(50, 18, '18',verticalalignment='center',horizontalalignment='right',fontsize=8)
-    pax.write(50, 9, '50',verticalalignment='center',horizontalalignment='center',fontsize=8)
-    
-    #Weight
-    pax = pp(plt.subplot(gs[0,3]),minlat=50)
-    fuv.plotimg(wic,'shweight',pax=pax,crange=(0,1))
-    cbaxes = pax.ax.inset_axes([.2,.0,.6,.03]) 
-    cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal')
-    cb.set_label('Weights')
-    pax.write(50,  6, '06',verticalalignment='center',horizontalalignment='left',fontsize=8)
-    pax.write(50, 12, '12',verticalalignment='bottom',horizontalalignment='center',fontsize=8)
-    pax.write(50, 18, '18',verticalalignment='center',horizontalalignment='right',fontsize=8)
-    pax.write(50, 9, '50',verticalalignment='center',horizontalalignment='center',fontsize=8)
-        
-
-    ## S13 ##
-    pax = pp(plt.subplot(gs[2,0]),minlat=50)
-    fuv.plotimg(s13,'dgimg',pax=pax,crange=(-15,15),cmap='coolwarm')
-    cbaxes = pax.ax.inset_axes([.2,.0,.6,.03]) 
-    cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal',extend='both')
-    cb.set_label('BS corrected image [counts]')
-    pax.ax.set_title('SI13',rotation='vertical',x=-0.03,y=0.45,verticalalignment='center',horizontalalignment='center')
-    pax.write(50,  6, '06',verticalalignment='center',horizontalalignment='left',fontsize=8)
-    pax.write(50, 12, '12',verticalalignment='bottom',horizontalalignment='center',fontsize=8)
-    pax.write(50, 18, '18',verticalalignment='center',horizontalalignment='right',fontsize=8)
-    pax.write(50, 9, '50',verticalalignment='center',horizontalalignment='center',fontsize=8)
-    
-    # Dayglow
-    pax = pp(plt.subplot(gs[2,1]),minlat=50)
-    fuv.plotimg(s13,'shmodel',pax=pax,crange=(-15,15),cmap='coolwarm')
-    cbaxes = pax.ax.inset_axes([.2,.0,.6,.03]) 
-    cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal',extend='both')
-    cb.set_label('SH model [counts]')
-    pax.write(50,  6, '06',verticalalignment='center',horizontalalignment='left',fontsize=8)
-    pax.write(50, 12, '12',verticalalignment='bottom',horizontalalignment='center',fontsize=8)
-    pax.write(50, 18, '18',verticalalignment='center',horizontalalignment='right',fontsize=8)
-    pax.write(50, 9, '50',verticalalignment='center',horizontalalignment='center',fontsize=8)
-    
-    # Corr
-    pax = pp(plt.subplot(gs[2,2]),minlat=50)
-    fuv.plotimg(s13,'shimg',pax=pax,crange=(-15,15),cmap='coolwarm')
-    cbaxes = pax.ax.inset_axes([.2,.0,.6,.03]) 
-    cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal',extend='both')
-    cb.set_label('SH corrected image [counts]')
-    pax.write(50,  6, '06',verticalalignment='center',horizontalalignment='left',fontsize=8)
-    pax.write(50, 12, '12',verticalalignment='bottom',horizontalalignment='center',fontsize=8)
-    pax.write(50, 18, '18',verticalalignment='center',horizontalalignment='right',fontsize=8)
-    pax.write(50, 9, '50',verticalalignment='center',horizontalalignment='center',fontsize=8)
-    
-    #Weight
-    pax = pp(plt.subplot(gs[2,3]),minlat=50)
-    fuv.plotimg(s13,'shweight',pax=pax,crange=(0,1))
-    cbaxes = pax.ax.inset_axes([.2,.0,.6,.03]) 
-    cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal')
-    cb.set_label('Weights')
-    pax.write(50,  6, '06',verticalalignment='center',horizontalalignment='left',fontsize=8)
-    pax.write(50, 12, '12',verticalalignment='bottom',horizontalalignment='center',fontsize=8)
-    pax.write(50, 18, '18',verticalalignment='center',horizontalalignment='right',fontsize=8)
-    pax.write(50, 9, '50',verticalalignment='center',horizontalalignment='center',fontsize=8)
-    
-    ## S12 ##
-    pax = pp(plt.subplot(gs[1,0]),minlat=50)
-    fuv.plotimg(s12,'dgimg',pax=pax,crange=(-5,5),cmap='coolwarm')
-    cbaxes = pax.ax.inset_axes([.2,.0,.6,.03]) 
-    cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal',extend='both')
-    cb.set_label('BS corrected image [counts]')
-    pax.ax.set_title('SI12',rotation='vertical',x=-0.03,y=0.45,verticalalignment='center',horizontalalignment='center')
-    pax.write(50,  6, '06',verticalalignment='center',horizontalalignment='left',fontsize=8)
-    pax.write(50, 12, '12',verticalalignment='bottom',horizontalalignment='center',fontsize=8)
-    pax.write(50, 18, '18',verticalalignment='center',horizontalalignment='right',fontsize=8)
-    pax.write(50, 9, '50',verticalalignment='center',horizontalalignment='center',fontsize=8)
-    
-    # Dayglow
-    pax = pp(plt.subplot(gs[1,1]),minlat=50)
-    fuv.plotimg(s12,'shmodel',pax=pax,crange=(-5,5),cmap='coolwarm')
-    cbaxes = pax.ax.inset_axes([.2,.0,.6,.03]) 
-    cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal',extend='both')
-    cb.set_label('SH model [counts]')
-    pax.write(50,  6, '06',verticalalignment='center',horizontalalignment='left',fontsize=8)
-    pax.write(50, 12, '12',verticalalignment='bottom',horizontalalignment='center',fontsize=8)
-    pax.write(50, 18, '18',verticalalignment='center',horizontalalignment='right',fontsize=8)
-    pax.write(50, 9, '50',verticalalignment='center',horizontalalignment='center',fontsize=8)
-    
-    # Corr
-    pax = pp(plt.subplot(gs[1,2]),minlat=50)
-    fuv.plotimg(s12,'shimg',pax=pax,crange=(-5,5),cmap='coolwarm')
-    cbaxes = pax.ax.inset_axes([.2,.0,.6,.03]) 
-    cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal',extend='both')
-    cb.set_label('SH corrected image [counts]')
-    pax.write(50,  6, '06',verticalalignment='center',horizontalalignment='left',fontsize=8)
-    pax.write(50, 12, '12',verticalalignment='bottom',horizontalalignment='center',fontsize=8)
-    pax.write(50, 18, '18',verticalalignment='center',horizontalalignment='right',fontsize=8)
-    pax.write(50, 9, '50',verticalalignment='center',horizontalalignment='center',fontsize=8)
-    
-    #Weight
-    pax = pp(plt.subplot(gs[1,3]),minlat=50)
-    fuv.plotimg(s12,'shweight',pax=pax,crange=(0,1))
-    cbaxes = pax.ax.inset_axes([.2,.0,.6,.03]) 
-    cb = plt.colorbar(pax.ax.collections[0],cax=cbaxes, orientation='horizontal')
-    cb.set_label('Weights')
-    pax.write(50,  6, '06',verticalalignment='center',horizontalalignment='left',fontsize=8)
-    pax.write(50, 12, '12',verticalalignment='bottom',horizontalalignment='center',fontsize=8)
-    pax.write(50, 18, '18',verticalalignment='center',horizontalalignment='right',fontsize=8)
-    pax.write(50, 9, '50',verticalalignment='center',horizontalalignment='center',fontsize=8)
-    
-    
-    
-    plt.savefig(outpath + 'fig6.png',bbox_inches='tight',dpi = 300)
-    plt.clf()
-    plt.close()
-
-
-
-
-
-
-    
-
-
-
-
-
-    

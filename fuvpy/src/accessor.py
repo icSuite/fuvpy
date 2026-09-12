@@ -1,5 +1,5 @@
 import xarray as xr
-from fuvpy.src.background import backgroundmodel_BS,backgroundmodel_SH
+from fuvpy.src.background import backgroundmodel_BS
 from fuvpy.src.boundaries import boundarymodel_BS,boundarymodel_F,detect_boundaries
 from fuvpy.src.plotting import plotimg,plot_backgroundmodel_BS,pplot,plot_ltlat,plotboundaries
 
@@ -18,13 +18,6 @@ class FuvAccessor:
         else:
             return backgroundmodel_BS(self._obj,**kwargs)
         
-    def backgroundmodel_SH(self,Nsh,Msh,**kwargs):
-        inplace = bool(kwargs.pop('inplace')) if 'inplace' in kwargs.keys() else False
-        if inplace:
-            backgroundmodel_SH(self._obj,Nsh,Msh,inplace=inplace,**kwargs)
-        else:
-            return backgroundmodel_SH(self._obj,Nsh,Msh,**kwargs)
-
     # Accessors to boundary models
     def detect_boundaries(self,**kwargs):
         return detect_boundaries(self._obj,**kwargs)
@@ -49,5 +42,4 @@ class FuvAccessor:
         return plot_ltlat(self._obj,inImg,**kwargs)
 
     def plotboundaries(self,boundary,**kwargs):
-        plotboundaries(self._obj,boundary,**kwargs)   
-    
+        plotboundaries(self._obj,boundary,**kwargs)

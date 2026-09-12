@@ -40,8 +40,8 @@ The variance can be used explicitly in the BS inversion with
 ``backgroundmodel_BS(..., input_variance="img_variance",
 variance_weighted=True)``. This multiplies data-fit rows by
 ``1/sqrt(img_variance)``. It does not replace the empirical ``dgsigma`` used
-for Tukey robust weighting. ``dampingVal`` is dimensionless: BS and SH scale
-the identity regularization by the median supported positive diagonal of
+for Tukey robust weighting. ``dampingVal`` is dimensionless: BS scales the
+identity regularization by the median supported positive diagonal of
 ``GTG`` from the initial weighted design matrix and keep that scale fixed
 through IRLS. Historical numerical
 damping values therefore need to be retuned.
