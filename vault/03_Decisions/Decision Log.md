@@ -215,3 +215,39 @@ knot defect. Defer correction of the stored residual/model norms until those
 diagnostics are needed for damping selection or an L-curve. The immediate
 production issues are the output support mask, silent keyword handling, and a
 safe nonzero damping scale.
+
+## 2026-09-13 — Fix dgsigma after the initial fit
+
+**Decision:** `backgroundmodel_BS()` always estimates `dgsigma` after IRLS
+iteration 0 and then holds it fixed while the Tukey weights and model continue
+to update. Remove the `dgsigma_freeze_iteration` option.
+
+**Rationale:** Iteration 0 is the intended revised calculation and no
+production use remains for the experimental freeze-iteration variants. A
+single behavior makes the fit and its metadata easier to interpret.
+
+## 2026-09-13 — Fix the noise model and spatial weighting
+
+**Decision:** `backgroundmodel_BS()` always uses the binned `dgsigma` model and
+bin-population spatial weighting. Remove the `noise_model` and
+`spatial_weighting` options, the pixel-expanded legacy noise model, and the
+Gaussian weighting path.
+
+**Rationale:** These are retained corrections rather than unresolved model
+choices. Removing the historical alternatives narrows the production function
+and prevents accidental processing with settings already rejected for the new
+archive.
+
+## 2026-09-13 — Remove unused BS interface controls
+
+**Decision:** `backgroundmodel_BS()` always returns a copy, always stores
+convergence diagnostics, uses `img_variance` whenever variance weighting is
+enabled, and uses the low-cost normal-system monotonic solver in production.
+Remove the public `inplace`, `diagnostics`, `input_variance`, and
+`monotonic_solver` selectors. Also reject the obsolete `dzalim` and `minlat`
+fit arguments; geometry filtering belongs to `read_idl()`.
+
+**Rationale:** None of these were unresolved scientific choices. Fixing their
+behavior makes production calls shorter and prevents configurations that were
+ignored, redundant, or retained only for superseded comparisons. The full
+monotonic solver remains internal for numerical equivalence tests.

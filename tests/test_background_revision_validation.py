@@ -12,24 +12,17 @@ validation = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(validation)
 
 
-def test_variants_are_the_six_cumulative_step_7_comparisons():
+def test_variants_are_the_three_cumulative_pilot_comparisons():
     names = [name for name, settings in validation.VARIANTS]
     assert names == [
-        "released",
-        "corrected_dgsigma",
-        "bin_population",
-        "frozen_dgsigma",
+        "no_measurement_weighting",
         "measurement_weighted",
         "monotonic"
     ]
 
     settings = dict(validation.VARIANTS)
-    assert settings["released"] == {}
-    assert settings["corrected_dgsigma"] == {"noise_model": "binned"}
-    assert settings["bin_population"]["spatial_weighting"] == "bin_population"
-    assert settings["frozen_dgsigma"]["dgsigma_freeze_iteration"] == 0
+    assert settings["no_measurement_weighting"] == {}
     assert settings["measurement_weighted"]["variance_weighted"] is True
-    assert settings["monotonic"]["monotonic_solver"] == "normal"
     assert settings["monotonic"]["monotonic_fallback"] is False
 
     previous = {}

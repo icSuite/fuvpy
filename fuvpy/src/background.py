@@ -188,53 +188,22 @@ def backgroundmodel_BS(imgs,**kwargs):
         If True, multiply the directional term by the normalized Spencer
         spherical-Chapman profile. The base model is unchanged. Default is
         False.
-    noise_model : {'legacy', 'binned'}, optional
-        Method used to estimate `dgsigma`. `legacy` reproduces the released
-        pixel-expanded regression. `binned` fits one residual variance and
-        one mean model-squared value per geometry bin. Default is `legacy`.
-    spatial_weighting : {'gaussian', 'bin_population'}, optional
-        Spatial row multiplier used by the least-squares fit. `gaussian`
-        reproduces the released inverse-Gaussian multiplier.
-        `bin_population` gives every populated 0.1-wide legacy-coordinate bin
-        equal total squared influence, independently in each frame. Default
-        is `gaussian`.
-    dgsigma_freeze_iteration : int, optional
-        Last zero-based IRLS iteration on which `dgsigma` is recalculated.
-        Zero retains the estimate from the initial fit. The default is 1,
-        reproducing the released calculation through iteration 1.
-    input_variance : str, optional
-        Name of the Dataset variable containing measurement variance in the
-        input image units squared. Required when `variance_weighted=True`.
     variance_weighted : bool, optional
         If True, multiply each fitted row by
-        `1/sqrt(imgs[input_variance])`. Default is False. With nonzero damping,
-        reassess `dampingVal` because absolute measurement weights change the
-        balance between the data and regularization.
+        `1/sqrt(imgs['img_variance'])`. Default is False.
     monotonic : bool, optional
         If True, constrain the fitted background to be non-decreasing with
         the legacy coordinate `cos(SZA)/cos(DZA)`. For the directional model,
         this constraint applies only to the base component. Default is False.
-    monotonic_solver : {'normal', 'full'}, optional
-        `normal` first reduces the weighted image rows to a small normal
-        system and is the operational default. `full` applies the same bounds
-        to all weighted rows as a reference calculation.
     monotonic_fallback : bool, optional
         If True, a failed monotonic solve uses the ordinary solver for that
         IRLS iteration and all remaining iterations. If False, the function
         returns an all-NaN background product with a failure flag. Neither
         case terminates a long processing run. Default is False.
-    diagnostics : bool, optional
-        If True, add scalar `dgfit_iterations` and `dgfit_converged` fields.
-        Failed solver products include these fields even when diagnostics is
-        False. Default is False.
-    inplace : bool, optional
-        If True, update the Dataset in place. Default is False (return a new Dataset).
-
-
     Returns
     -------
-    imgs : xarray.Dataset, if inplace is False
-        A copy of the input Dataset with four new data_vars:
+    imgs : xarray.Dataset
+        A copy of the input Dataset with new data variables:
             - imgs['dgmodel'] is the B-spline based dayglow model
             - imgs['dgimg'] is the dayglow-corrected image (dayglow subtracked from the input image)
             - imgs['dgweight'] is the weights after the final iteration
@@ -257,34 +226,12 @@ def backgroundmodel_BS(imgs,**kwargs):
     spatial_model = kwargs.pop('spatial_model') if 'spatial_model' in kwargs.keys() else 'legacy'
     directional_x_knots = kwargs.pop('directional_x_knots') if 'directional_x_knots' in kwargs.keys() else None
     spencer_taper = bool(kwargs.pop('spencer_taper')) if 'spencer_taper' in kwargs.keys() else False
-    noise_model = kwargs.pop('noise_model') if 'noise_model' in kwargs.keys() else 'legacy'
-    spatial_weighting = kwargs.pop('spatial_weighting') if 'spatial_weighting' in kwargs.keys() else 'gaussian'
-    dgsigma_freeze_iteration = kwargs.pop('dgsigma_freeze_iteration') if 'dgsigma_freeze_iteration' in kwargs.keys() else 1
-    input_variance = kwargs.pop('input_variance') if 'input_variance' in kwargs.keys() else None
     variance_weighted = bool(kwargs.pop('variance_weighted')) if 'variance_weighted' in kwargs.keys() else False
     monotonic = bool(kwargs.pop('monotonic')) if 'monotonic' in kwargs.keys() else False
-    monotonic_solver = kwargs.pop('monotonic_solver') if 'monotonic_solver' in kwargs.keys() else 'normal'
     monotonic_fallback = bool(kwargs.pop('monotonic_fallback')) if 'monotonic_fallback' in kwargs.keys() else False
-    diagnostics = bool(kwargs.pop('diagnostics')) if 'diagnostics' in kwargs.keys() else False
-    inplace = bool(kwargs.pop('inplace')) if 'inplace' in kwargs.keys() else False
-
-    # These limits belonged to the old fit API. Current files apply detector
-    # and viewing-angle masks in read_idl(), but the paper scripts still pass
-    # the historical arguments and are kept runnable for reference.
-    obsolete = [name for name in ['dzalim', 'minlat'] if name in kwargs]
-    for name in obsolete:
-        kwargs.pop(name)
-    if obsolete:
-        warnings.warn(f"{', '.join(obsolete)} no longer restrict backgroundmodel_BS; apply geometry limits when loading the images", DeprecationWarning, stacklevel=2)
     if kwargs:
         names = ', '.join(sorted(kwargs))
         raise TypeError(f"Unexpected backgroundmodel_BS keyword argument(s): {names}")
-
-    if noise_model not in ['legacy', 'binned']:
-        raise ValueError("noise_model must be 'legacy' or 'binned'")
-
-    if spatial_weighting not in ['gaussian', 'bin_population']:
-        raise ValueError("spatial_weighting must be 'gaussian' or 'bin_population'")
 
     if spatial_model not in ['legacy', 'legacy_x_azimuth']:
         raise ValueError("spatial_model must be 'legacy' or 'legacy_x_azimuth'")
@@ -295,13 +242,7 @@ def backgroundmodel_BS(imgs,**kwargs):
     if spencer_taper and not directional_model:
         raise ValueError("spencer_taper=True is only available for spatial_model='legacy_x_azimuth'")
 
-    if (isinstance(dgsigma_freeze_iteration, (bool, np.bool_)) or not isinstance(dgsigma_freeze_iteration, (int, np.integer)) or dgsigma_freeze_iteration < 0):
-        raise ValueError("dgsigma_freeze_iteration must be a non-negative integer")
-
-    if monotonic_solver not in ['normal', 'full']:
-        raise ValueError("monotonic_solver must be 'normal' or 'full'")
-
-    if not inplace: imgs = imgs.copy(deep=True)
+    imgs = imgs.copy(deep=True)
 
     # Add temporal dimension if missing
     if len(imgs.sizes)==2: imgs = imgs.expand_dims('date')
@@ -318,8 +259,6 @@ def backgroundmodel_BS(imgs,**kwargs):
         sza = imgs['sza'].stack(z=('row','col')).values
         fraction = np.cos(np.deg2rad(sza))
         if sKnots is None: sKnots= [-1,-0.1,0,0.1,0.4,1]
-        if spatial_weighting == 'bin_population':
-            raise ValueError("bin_population spatial weighting requires the legacy FUV coordinate")
         if monotonic:
             raise ValueError("monotonic fitting requires the legacy FUV coordinate")
     base_breaks = np.asarray(sKnots, dtype=float)
@@ -395,12 +334,9 @@ def backgroundmodel_BS(imgs,**kwargs):
     if monotonic and directional_model:
         monotonic_transform, monotonic_lower = _monotonic_base_transform(n_base_scp, n_scp, n_tcp)
 
-    # Spatial sampling weights
-    if spatial_weighting == 'gaussian':
-        ws = 1/np.exp(-0.5*(fraction/1.5)**2)
-    else:
-        spatial_bins = np.arange(sKnots[0], sKnots[-1] + 0.1, 0.1)
-        ws = _bin_population_weights(fraction, fit_support, spatial_bins)
+    # Give every populated geometry bin equal total squared influence.
+    spatial_bins = np.arange(sKnots[0], sKnots[-1] + 0.1, 0.1)
+    ws = _bin_population_weights(fraction, fit_support, spatial_bins)
 
     # Make everything flat
     d_s = imgs['img'].stack(z=('row','col')).values.flatten()
@@ -413,22 +349,20 @@ def backgroundmodel_BS(imgs,**kwargs):
     # residual scaling below.
     measurement_w = np.ones_like(d_s)
     if variance_weighted:
-        if not isinstance(input_variance, str):
-            raise ValueError("input_variance must name a Dataset variable when variance_weighted=True")
-        if input_variance not in imgs:
-            raise ValueError(f"Input variance variable '{input_variance}' is not in imgs")
+        if 'img_variance' not in imgs:
+            raise ValueError("variance_weighted=True requires imgs['img_variance']")
 
         try:
-            measurement_variance = imgs[input_variance].transpose('date', 'row', 'col').stack(z=('row', 'col')).values.flatten()
+            measurement_variance = imgs['img_variance'].transpose('date', 'row', 'col').stack(z=('row', 'col')).values.flatten()
         except ValueError:
-            raise ValueError("Input variance must have date, row, and col dimensions")
+            raise ValueError("img_variance must have date, row, and col dimensions")
 
         if measurement_variance.shape != d_s.shape:
-            raise ValueError("Input variance must have the same shape as the image")
+            raise ValueError("img_variance must have the same shape as img")
         if np.any(~np.isfinite(measurement_variance[ind])):
-            raise ValueError("Input variance must be finite at fitted pixels")
+            raise ValueError("img_variance must be finite at fitted pixels")
         if np.any(measurement_variance[ind] <= 0):
-            raise ValueError("Input variance must be strictly positive at fitted pixels")
+            raise ValueError("img_variance must be strictly positive at fitted pixels")
 
         measurement_w[ind] = 1/np.sqrt(measurement_variance[ind])
 
@@ -458,7 +392,7 @@ def backgroundmodel_BS(imgs,**kwargs):
 
         if use_monotonic:
             try:
-                m_s = _solve_monotonic_bs(weighted_design, weighted_data, R, n_scp, n_tcp, monotonic_solver, monotonic_transform, monotonic_lower)
+                m_s = _solve_monotonic_bs(weighted_design, weighted_data, R, n_scp, n_tcp, 'normal', monotonic_transform, monotonic_lower)
             except RuntimeError as error:
                 if not monotonic_fallback:
                     warnings.warn(f"Monotonic B-spline solve failed; returning an all-NaN background product: {error}", RuntimeWarning, stacklevel=2)
@@ -492,12 +426,9 @@ def backgroundmodel_BS(imgs,**kwargs):
             dm_sine = np.array([G_sine_g[i]@mNew[i, n_base_scp:] for i in range(n_t)]).squeeze()
         residuals = (d_s[ind] - dm.flatten()[ind])
 
-        if iteration <= dgsigma_freeze_iteration:
+        if iteration == 0:
             sigma = np.full_like(d_s,np.nan)
-            if noise_model == 'legacy':
-                sigma[ind] = _noisemodel(fraction.flatten()[ind], d_s[ind], dm.flatten()[ind], w[ind]*ws[ind]**2, sKnots)
-            else:
-                sigma[ind] = _noisemodel_binned(fraction.flatten()[ind], d_s[ind], dm.flatten()[ind], w[ind]*ws[ind]**2, sKnots)
+            sigma[ind] = _noisemodel_binned(fraction.flatten()[ind], d_s[ind], dm.flatten()[ind], w[ind]*ws[ind]**2, sKnots)
         w[ind] = (1 - np.minimum(1,(residuals/(tukeyVal*sigma[ind]))**2))**2
 
         if m is not None: diff = np.sqrt(np.mean((mNew-m)**2))/(1+np.sqrt(np.mean(mNew**2)))
@@ -537,9 +468,8 @@ def backgroundmodel_BS(imgs,**kwargs):
     if directional_model and spencer_taper:
         imgs['spencer_taper_factor'] = (['date','row','col'],directional_taper.reshape((n_t,len(imgs.row),len(imgs.col))))
     fit_converged = False if fit_failed else iteration < 100 and np.isfinite(diff) and diff <= stop
-    if diagnostics or fit_failed:
-        imgs['dgfit_iterations'] = iteration
-        imgs['dgfit_converged'] = fit_converged
+    imgs['dgfit_iterations'] = iteration
+    imgs['dgfit_converged'] = fit_converged
 
     # Do not return extrapolated models or fitting weights outside the pixels
     # that actually contributed to the inverse problem.
@@ -566,16 +496,16 @@ def backgroundmodel_BS(imgs,**kwargs):
         'temporal_knots_minutes_from_first_image': temporal_breaks,
         'temporal_knot_count': int(len(temporal_breaks)),
         'temporal_order': int(tOrder),
-        'noise_model': noise_model,
-        'spatial_weighting': spatial_weighting,
-        'dgsigma_freeze_iteration': int(dgsigma_freeze_iteration),
+        'noise_model': 'binned',
+        'spatial_weighting': 'bin_population',
+        'dgsigma_estimation': 'initial_fit',
         'robust_weighting': 'tukey_bisquare',
         'tukey_value': float(tukeyVal),
-        'input_variance': 'none' if input_variance is None else str(input_variance),
+        'measurement_variance': 'img_variance' if variance_weighted else 'not_used',
         'variance_weighted': 'true' if variance_weighted else 'false',
         'monotonic_requested': 'true' if monotonic else 'false',
         'monotonic_constraint': monotonic_constraint,
-        'monotonic_solver': monotonic_solver,
+        'monotonic_solver': 'normal' if monotonic else 'not_used',
         'monotonic_fallback': 'true' if monotonic_fallback else 'false',
         'spencer_taper': 'enabled' if spencer_taper else 'disabled',
         'damping_value': float(dampingVal),
@@ -602,36 +532,9 @@ def backgroundmodel_BS(imgs,**kwargs):
         imgs['dgmodel_sine'].attrs = {'long_name': 'Sine-like solar-view directional background component'}
         if spencer_taper:
             imgs['spencer_taper_factor'].attrs = {'long_name': 'Normalized spherical-Chapman production factor', 'units': '1'}
-    if diagnostics or fit_failed:
-        imgs['dgfit_iterations'].attrs = {'long_name': 'Number of BS IRLS iterations'}
-        imgs['dgfit_converged'].attrs = {'long_name': 'BS IRLS convergence status'}
-    # Return the new DataSet if not inplace 
-    if not inplace:
-        return imgs
-
-def _noisemodel(fraction,d,dm,w,sKnots):
-
-    # Binned RMSE
-    bins = np.r_[sKnots[0],np.arange(0,sKnots[-1]+0.25,0.25)]
-    binnumber = np.digitize(fraction,bins)
-
-    rmse=np.full_like(d,np.nan)
-    for i in range(1,len(bins)):
-        ind = binnumber==i
-        if np.sum(w[ind])==0:
-            rmse[ind]=np.nan
-        else:
-            rmse[ind]=np.sqrt(np.average((d[ind]-dm[ind])**2,weights=w[ind]))
-
-    # Linear fit with bounds
-    ind2 = np.isfinite(rmse)
-    def func(x,a,b):
-        return a*x+b
-
-    popt, pcov=curve_fit(func, dm[ind2]**2, rmse[ind2]**2, bounds=(0,np.inf))
-    rmseFit = np.sqrt(func(dm**2,*popt))
-    return rmseFit
-
+    imgs['dgfit_iterations'].attrs = {'long_name': 'Number of BS IRLS iterations'}
+    imgs['dgfit_converged'].attrs = {'long_name': 'BS IRLS convergence status'}
+    return imgs
 
 def _noise_bins(sKnots):
     """Return one nightside and fourteen 0.25-wide dayside bins."""

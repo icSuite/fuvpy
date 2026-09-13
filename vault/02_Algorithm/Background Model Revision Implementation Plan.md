@@ -120,10 +120,9 @@ Use this IRLS sequence:
 3. Calculate the first Tukey weights.
 4. Keep that \(d\sigma\) fixed during all later IRLS iterations.
 
-Retain an integer setting so another freeze iteration can be tested when
-needed, but use iteration 0 for the revised calculation. Candidate diagnostic
-histories from the experimental branch are not required in the clean
-implementation.
+The revised calculation always freezes `dgsigma` after iteration 0. Later
+experiments showed no production reason to expose alternative freeze
+iterations, so the clean implementation has no freeze-iteration option.
 
 Focused verification:
 

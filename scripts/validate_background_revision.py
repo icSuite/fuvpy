@@ -29,43 +29,18 @@ DETECTOR_SHAPES = {
 }
 
 VARIANTS = [
-    ("released", {}),
-    ("corrected_dgsigma", {"noise_model": "binned"}),
-    (
-        "bin_population",
-        {
-            "noise_model": "binned",
-            "spatial_weighting": "bin_population"
-        }
-    ),
-    (
-        "frozen_dgsigma",
-        {
-            "noise_model": "binned",
-            "spatial_weighting": "bin_population",
-            "dgsigma_freeze_iteration": 0
-        }
-    ),
+    ("no_measurement_weighting", {}),
     (
         "measurement_weighted",
         {
-            "noise_model": "binned",
-            "spatial_weighting": "bin_population",
-            "dgsigma_freeze_iteration": 0,
-            "input_variance": "img_variance",
             "variance_weighted": True
         }
     ),
     (
         "monotonic",
         {
-            "noise_model": "binned",
-            "spatial_weighting": "bin_population",
-            "dgsigma_freeze_iteration": 0,
-            "input_variance": "img_variance",
             "variance_weighted": True,
             "monotonic": True,
-            "monotonic_solver": "normal",
             "monotonic_fallback": False
         }
     )
@@ -327,7 +302,6 @@ def main(argv=None):
         "dampingVal": args.damping,
         "tukeyVal": args.tukey,
         "stop": args.stop,
-        "diagnostics": True
     }
 
     metric_rows = []

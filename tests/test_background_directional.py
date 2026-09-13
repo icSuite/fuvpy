@@ -40,7 +40,7 @@ def _directional_background(spencer_taper=False):
 
 
 def _fit_exact_background(monkeypatch, images, **options):
-    monkeypatch.setattr(background, '_noisemodel', lambda fraction, image, model, weights, knots: np.full_like(image, 1e6))
+    monkeypatch.setattr(background, '_noisemodel_binned', lambda fraction, image, model, weights, knots: np.full_like(image, 1e6))
     return background.backgroundmodel_BS(images, spatial_model='legacy_x_azimuth', sKnots=[-3.5, 0, 3.5], sOrder=1, tukeyVal=1e6, stop=1e-8, **options)
 
 
@@ -115,21 +115,12 @@ def test_monotonic_transform_leaves_directional_coefficients_free():
     assert np.all(np.isneginf(lower[6:]))
 
 
-def test_directional_normal_and_full_monotonic_solvers_agree(monkeypatch):
-    images = _directional_background()
-    options = {'monotonic': True, 'dampingVal': 1e-3}
-    normal = _fit_exact_background(monkeypatch, images, monotonic_solver='normal', **options)
-    full = _fit_exact_background(monkeypatch, images, monotonic_solver='full', **options)
-
-    np.testing.assert_allclose(normal['dgmodel'], full['dgmodel'], rtol=1e-7, atol=1e-7)
-
-
 def test_directional_model_uses_revised_weights(monkeypatch):
     images = _directional_background()
     images['img_variance'] = xr.ones_like(images['img'])*4
     monkeypatch.setattr(background, '_noisemodel_binned', lambda fraction, image, model, weights, knots: np.full_like(image, 1e6))
 
-    result = background.backgroundmodel_BS(images, spatial_model='legacy_x_azimuth', directional_x_knots=[-3.5, 0, 3.5], sKnots=[-3.5, 0, 3.5], sOrder=1, noise_model='binned', spatial_weighting='bin_population', dgsigma_freeze_iteration=0, input_variance='img_variance', variance_weighted=True, tukeyVal=1e6, stop=1e-8)
+    result = background.backgroundmodel_BS(images, spatial_model='legacy_x_azimuth', directional_x_knots=[-3.5, 0, 3.5], sKnots=[-3.5, 0, 3.5], sOrder=1, variance_weighted=True, tukeyVal=1e6, stop=1e-8)
 
     fitted = np.isfinite(result['dgmodel'].values)
     assert np.any(fitted)
@@ -154,7 +145,7 @@ def test_directional_outputs_survive_netcdf_round_trip(monkeypatch, tmp_path):
     np.testing.assert_array_equal(loaded['dgmodel'].attrs['temporal_knots_minutes_from_first_image'], [0, 4])
     assert loaded['dgmodel'].attrs['spatial_order'] == 1
     assert loaded['dgmodel'].attrs['fit_iterations'] == result['dgmodel'].attrs['fit_iterations']
-    for name in ['temporal_knot_count', 'temporal_order', 'noise_model', 'spatial_weighting', 'dgsigma_freeze_iteration', 'robust_weighting', 'tukey_value', 'input_variance', 'variance_weighted', 'monotonic_requested', 'monotonic_constraint', 'monotonic_solver', 'monotonic_fallback', 'damping_value', 'damping_scale', 'convergence_tolerance', 'maximum_iterations', 'fit_converged']:
+    for name in ['temporal_knot_count', 'temporal_order', 'noise_model', 'spatial_weighting', 'dgsigma_estimation', 'robust_weighting', 'tukey_value', 'measurement_variance', 'variance_weighted', 'monotonic_requested', 'monotonic_constraint', 'monotonic_solver', 'monotonic_fallback', 'damping_value', 'damping_scale', 'convergence_tolerance', 'maximum_iterations', 'fit_converged']:
         assert loaded['dgmodel'].attrs[name] == result['dgmodel'].attrs[name]
     assert int(loaded['dgsolver_flag']) == int(result['dgsolver_flag'])
     np.testing.assert_array_equal(loaded['dgsolver_flag'].attrs['flag_values'], [0, 1, 2, 3, 4])

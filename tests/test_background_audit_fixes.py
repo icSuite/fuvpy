@@ -21,11 +21,10 @@ def test_unknown_keyword_is_rejected():
         background.backgroundmodel_BS(_synthetic_wic(), nonsense_option=True)
 
 
-def test_paper_geometry_keywords_remain_accepted_but_warn():
-    with pytest.warns(DeprecationWarning, match="no longer restrict"):
-        result = background.backgroundmodel_BS(_synthetic_wic(), dzalim=75, minlat=-90, stop=1e-5)
-
-    assert np.any(np.isfinite(result["dgmodel"]))
+@pytest.mark.parametrize("option", ["dzalim", "minlat"])
+def test_obsolete_geometry_keywords_are_rejected(option):
+    with pytest.raises(TypeError, match=option):
+        background.backgroundmodel_BS(_synthetic_wic(), **{option: 75})
 
 
 def test_returned_fields_are_masked_outside_fit_support():
@@ -47,14 +46,15 @@ def test_dgsigma_uses_tukey_times_squared_spatial_multiplier(monkeypatch):
         captured_weights.append(weights.copy())
         return np.full_like(image, 1000.0)
 
-    monkeypatch.setattr(background, "_noisemodel", capture_noisemodel)
+    monkeypatch.setattr(background, "_noisemodel_binned", capture_noisemodel)
     imgs = _synthetic_wic()
 
-    background.backgroundmodel_BS(imgs, dgsigma_freeze_iteration=0, stop=1e-5)
+    background.backgroundmodel_BS(imgs, stop=1e-5)
 
     fraction = np.cos(np.deg2rad(imgs["sza"].stack(z=("row", "col")).values))/np.cos(np.deg2rad(imgs["dza"].stack(z=("row", "col")).values))
     valid = (imgs["sza"].stack(z=("row", "col")).values >= 0) & np.isfinite(imgs["img"].stack(z=("row", "col")).values) & (fraction > -3.5) & (fraction < 3.5)
-    spatial_multiplier = 1/np.exp(-0.5*(fraction/1.5)**2)
+    spatial_bins = np.arange(-3.5, 3.5 + 0.1, 0.1)
+    spatial_multiplier = background._bin_population_weights(fraction, valid, spatial_bins)
 
     assert len(captured_weights) == 1
     np.testing.assert_allclose(captured_weights[0], spatial_multiplier[valid]**2)

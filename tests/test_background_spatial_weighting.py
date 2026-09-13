@@ -1,8 +1,5 @@
 import numpy as np
-import pytest
-import xarray as xr
-
-from fuvpy.src.background import _bin_population_weights, backgroundmodel_BS
+from fuvpy.src.background import _bin_population_weights
 
 
 SPATIAL_BINS = np.arange(-0.2, 0.3 + 0.1, 0.1)
@@ -48,16 +45,3 @@ def test_empty_bins_and_out_of_fit_pixels_do_not_affect_weights():
 
     np.testing.assert_allclose(weights[0, :3], reference[0])
     assert np.all(np.isnan(weights[~valid]))
-
-
-def test_bin_population_option_is_limited_to_legacy_fuv_coordinate():
-    vis = xr.Dataset(
-        data_vars={
-            "id": "VIS",
-            "sza": (("row", "col"), [[60.0]]),
-            "img": (("row", "col"), [[1.0]])
-        }
-    )
-
-    with pytest.raises(ValueError, match="legacy FUV coordinate"):
-        backgroundmodel_BS(vis, spatial_weighting="bin_population")

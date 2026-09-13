@@ -172,23 +172,18 @@ fit covariance. The same binned RMSE is repeated for every pixel in a bin, so
 it must not be treated as a calibrated uncertainty on `a` and `b` without a
 separate statistical justification.
 
-The experimental implementation now separates the operational scale from its
-diagnostic evolution. `dgsigma_freeze_iteration` controls the last candidate
-used by IRLS. When diagnostics are enabled,
-`dgsigma_diagnostic_iterations` independently controls how many early
-candidate scale fields and corresponding empirical Tukey-weight fields are
-retained. Candidates calculated after the freeze are not fed back into the
-fit. This makes it possible to diagnose whether a constant fitted scale is a
-property of the binned variance law or a later consequence of reweighting.
+The revised production implementation estimates `dgsigma` after the initial
+fit and then keeps it fixed while later Tukey weights and model coefficients
+continue to update. Alternative freeze iterations and diagnostic scale
+histories belonged to the discarded experimental implementation and are no
+longer exposed.
 
-The BS spatial sampling multiplier is independently selectable through
-`spatial_weighting`. `"gaussian"` retains the package behavior,
-`"bin_population"` gives every populated geometry bin equal total
-least-squares weight, and `"none"` uses unit multipliers. Because row
-multipliers are squared by the normal equations, bin-population weighting uses
-inverse square-root counts. It is normalized to retain unit mean squared
-weight so that selecting it does not inadvertently change the scale of the
-fixed damping.
+The BS spatial sampling multiplier is fixed to bin-population weighting. Every
+populated geometry bin receives equal total least-squares weight. Because row
+multipliers are squared by the normal equations, each pixel receives an
+inverse-square-root population multiplier. The multipliers are normalized to
+retain unit mean squared weight so that they do not inadvertently change the
+scale of the damping.
 
 ### 4.3 Spherical-harmonic fit
 
@@ -235,13 +230,15 @@ conditional covariance is not used with this option: active inequality
 constraints make the estimator piecewise linear rather than the
 unconstrained linear smoother assumed by that covariance calculation.
 
-Two bounded solvers are retained. `monotonic_solver="full"` applies BVLS to
-the complete weighted pixel design and is the more numerically stable
-reference. `monotonic_solver="normal"` first forms the same small normal
-matrix and right-hand side used by the original fit, transforms that system
-to the monotonic-increment parameters, and applies BVLS only to the resulting
-coefficient-sized problem. The latter is the low-cost default, with the usual
-normal-equation tradeoff of squaring the design matrix's condition number.
+Two bounded calculations remain internally. The full calculation applies BVLS
+to the complete weighted pixel design and is the numerical reference. The
+production calculation first forms the same small normal matrix and right-hand
+side used by the ordinary fit, transforms that system to monotonic-increment
+parameters, and applies BVLS only to the coefficient-sized problem. The public
+solver selector was removed: production always uses the low-cost calculation,
+while tests retain the full calculation for numerical comparison. The low-cost
+route has the usual normal-equation tradeoff of squaring the design matrix's
+condition number.
 
 ### 4.5 Optional effective-illumination coordinate
 

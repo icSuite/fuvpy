@@ -41,9 +41,9 @@ run:
 - if the ordinary fallback also fails, an all-NaN product is returned with
   flag 4.
 
-All-NaN failure products record `dgfit_converged=False`, even when the optional
-diagnostics were not requested. `dgsolver_flag` stores the solver outcome and
-the solver error message is retained in its metadata.
+All results store `dgfit_iterations` and `dgfit_converged`; all-NaN failure
+products record `dgfit_converged=False`. `dgsolver_flag` stores the solver
+outcome and retains the solver error message in its metadata.
 
 ## 4. Make each BS result self-describing — complete
 
@@ -53,16 +53,16 @@ including at least:
 - spatial model and directional settings;
 - Spencer-taper setting;
 - spline knots and orders;
-- noise model and spatial weighting;
-- `dgsigma` freeze iteration;
+- fixed binned noise model and bin-population spatial weighting;
+- fixed initial-fit `dgsigma` estimation;
 - Tukey settings;
 - measurement-variance and monotonic settings;
 - damping value; and
 - convergence and solver diagnostics.
 
 The effective configuration is stored on `dgmodel`. It includes the spatial
-model, spline breakpoints and orders, noise and spatial weights,
-`dgsigma` freeze iteration, Tukey setting, measurement-variance configuration,
+model, spline breakpoints and orders, the fixed noise and spatial weights,
+initial-fit `dgsigma` estimation, Tukey setting, measurement-variance configuration,
 monotonic configuration, Spencer taper, dimensionless damping, the actual
 normal-matrix damping scale, convergence tolerance, iteration count, and
 convergence status. Solver outcome and error information remain on
@@ -71,6 +71,11 @@ convergence status. Solver outcome and error information remain on
 Focused tests confirm that the configuration and solver flags survive an
 xarray NetCDF save/reload round trip. This concerns fuvpy output content, not
 the later icBuilder restart mechanism.
+
+The production interface has also been narrowed: BS always returns a copy,
+variance weighting always uses `img_variance`, and monotonic fitting always
+uses the low-cost normal-system solver. Experimental or obsolete selectors are
+no longer accepted.
 
 ## 5. Run the complete-orbit pilot and select damping — pending (next)
 

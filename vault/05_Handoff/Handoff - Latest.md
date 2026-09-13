@@ -15,13 +15,8 @@ backgroundmodel_BS(
     spatial_model="legacy_x_azimuth",
     directional_x_knots=[-3.5, 0, 1.5, 3.5],
     spencer_taper=True,
-    noise_model="binned",
-    spatial_weighting="bin_population",
-    dgsigma_freeze_iteration=0,
-    input_variance="img_variance",
     variance_weighted=True,
-    monotonic=True,
-    diagnostics=True
+    monotonic=True
 )
 ```
 
@@ -54,7 +49,7 @@ were removed.
 
 ## Verification
 
-`pytest -q` reports 93 passes. `img_variance` now records `calculated_from`,
+`pytest -q` reports 88 passes. `img_variance` now records `calculated_from`,
 `excludes`, and the WIC `reflattening_assumption`. The metadata fix does not
 change the variance values or background fit. No active source, test, or
 script refers to SH, SBS, or `asymmetric_legacy`.
@@ -72,6 +67,21 @@ and solver flags survive NetCDF save/reload.
 
 `backgroundmodel_BS()` now always fits `img`. The obsolete `inImg` option and
 its redundant metadata were removed.
+
+`dgsigma` is always estimated after iteration 0 and then held fixed while the
+Tukey weights continue to update. The obsolete `dgsigma_freeze_iteration`
+option was removed.
+
+The binned `dgsigma` model and bin-population spatial weights are now the only
+implementations. The obsolete `noise_model` and `spatial_weighting` options,
+legacy pixel-expanded noise model, and Gaussian weighting path were removed.
+
+The remaining unused public controls were also removed. BS always returns a
+copy, always saves convergence diagnostics, reads `img_variance` when
+`variance_weighted=True`, and uses the low-cost normal-system monotonic solver.
+The obsolete `inplace`, `diagnostics`, `input_variance`, `monotonic_solver`,
+`dzalim`, and `minlat` arguments are rejected. The full monotonic solver remains
+an internal numerical reference.
 
 ## Downstream incompatibility
 

@@ -19,7 +19,7 @@ No BS source code was changed during this audit.
 
 ## Post-audit implementation — 2026-09-10
 
-The production-relevant support-mask and keyword defects are now fixed. All BS products are masked to the pixels that actually entered the fit. Unknown keywords raise immediately, while the historical `dzalim` and `minlat` arguments remain accepted with a deprecation warning so the Ohma paper scripts remain runnable.
+The production-relevant support-mask and keyword defects are now fixed. All BS products are masked to the pixels that actually entered the fit. Unknown keywords raise immediately. The historical `dzalim` and `minlat` BS arguments were initially retained with a warning, then removed on 2026-09-13 after the obsolete paper examples were deleted; geometry limits now belong solely to loading.
 
 The damping scale now uses the median of numerically supported positive entries of `diag(GTG)` in both BS and SH and raises if no coefficient is supported. The `dgsigma` regressions now receive `Tukey * spatial_multiplier**2`, matching the Tukey/spatial part of the revised inversion objective while continuing to exclude measurement variance deliberately.
 

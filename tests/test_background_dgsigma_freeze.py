@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 import xarray as xr
 
 import fuvpy.src.background as background
@@ -47,32 +46,15 @@ def test_iteration_zero_dgsigma_is_retained_during_later_fits(monkeypatch):
         estimates.append(estimate)
         return np.full_like(image, estimate)
 
-    monkeypatch.setattr(background, "_noisemodel", changing_noisemodel)
+    monkeypatch.setattr(background, "_noisemodel_binned", changing_noisemodel)
 
-    result = background.backgroundmodel_BS(_synthetic_wic(), dgsigma_freeze_iteration=0, stop=1e-5)
+    result = background.backgroundmodel_BS(_synthetic_wic(), stop=1e-5)
 
     assert estimates == [10.0]
     np.testing.assert_allclose(result["dgsigma"].values[np.isfinite(result["dgsigma"])], 10.0)
     assert np.any(result["dgweight"].values < 1)
 
 
-def test_default_recalculates_through_iteration_one(monkeypatch):
-    estimates = []
-
-    def changing_noisemodel(fraction, image, model, weights, knots):
-        estimate = 10.0 + len(estimates)
-        estimates.append(estimate)
-        return np.full_like(image, estimate)
-
-    monkeypatch.setattr(background, "_noisemodel", changing_noisemodel)
-
-    result = background.backgroundmodel_BS(_synthetic_wic(), stop=1e-5)
-
-    assert estimates == [10.0, 11.0]
-    np.testing.assert_allclose(result["dgsigma"].values[np.isfinite(result["dgsigma"])], 11.0)
-
-
-@pytest.mark.parametrize("value", [-1, 0.5, "0", True])
-def test_dgsigma_freeze_iteration_must_be_nonnegative_integer(value):
-    with pytest.raises(ValueError, match="non-negative integer"):
-        background.backgroundmodel_BS(xr.Dataset(), dgsigma_freeze_iteration=value)
+def test_dgsigma_freeze_iteration_is_not_configurable():
+    with np.testing.assert_raises_regex(TypeError, "dgsigma_freeze_iteration"):
+        background.backgroundmodel_BS(_synthetic_wic(), dgsigma_freeze_iteration=1)

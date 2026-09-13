@@ -205,16 +205,12 @@ def process_sensor(sensor, directory):
 
         settings = dict(BS_SETTINGS)
         settings["n_tKnots"] = min(5, sequence.sizes["date"])
-        settings["input_variance"] = "img_variance"
-        settings["diagnostics"] = True
-        settings['spatial_weighting'] = "bin_population"
-        settings['dgsigma_freeze_iteration'] = 0
 
         # Combined revised model
-        m2 = fuv.backgroundmodel_BS(sequence, noise_model="binned", variance_weighted=True, monotonic=True, **settings)
+        m2 = fuv.backgroundmodel_BS(sequence, variance_weighted=True, monotonic=True, **settings)
         
         # Asymmetric
-        m3 = fuv.backgroundmodel_BS(sequence, spatial_model="legacy_x_azimuth", directional_x_knots=[-3.5, 0, 1.5, 3.5], spencer_taper=True, noise_model="binned", variance_weighted=True, monotonic=True, **settings)
+        m3 = fuv.backgroundmodel_BS(sequence, spatial_model="legacy_x_azimuth", directional_x_knots=[-3.5, 0, 1.5, 3.5], spencer_taper=True, variance_weighted=True, monotonic=True, **settings)
 
         for frame in range(sequence.sizes["date"]):
             plot_frame(sequence, legacy_sequence, m2, m3, frame, output_directory)

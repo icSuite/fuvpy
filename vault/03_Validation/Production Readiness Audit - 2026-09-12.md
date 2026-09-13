@@ -7,16 +7,15 @@ Branch: `background_model_asymmetry`
 
 Do not start the complete IMAGE reprocessing yet. No new numerical defect was
 confirmed in the selected directional BS path, and the cleaned local suite has
-90 passing tests. The remaining blockers are integration, validation, and
+88 passing tests. The remaining blockers are integration, validation, and
 long-run safety.
 
 ## Blockers
 
 1. `icBuilder/scripts/pipeline/make_orbit_nc_files.py` still calls the old
    loader and BS configuration. It does not request measurement variance,
-   viewing geometry, the directional model, Spencer taper, binned `dgsigma`,
-   bin-population weighting, iteration-0 freezing, variance weighting,
-   monotonicity, or diagnostics.
+   viewing geometry, the directional model, Spencer taper, variance weighting,
+   or monotonicity.
 2. Production dimensionless BS damping has not been selected. Historical
    numeric values do not retain their old meaning after
    scaling regularization by the initial weighted normal matrix.
@@ -31,8 +30,8 @@ long-run safety.
 
 ## Repairs before the pilot
 
-- Enable and inspect `dgfit_iterations`, `dgfit_converged`, and
-  `dgsolver_flag` in production outputs.
+- Inspect the always-saved `dgfit_iterations`, `dgfit_converged`, and
+  `dgsolver_flag` fields in production outputs.
 - The monotonic-failure policy is implemented. Ordinary fallback is optional;
   all failure paths return explicit flags without terminating processing, and
   `monotonic_constraint` reflects the saved result.
@@ -49,7 +48,7 @@ long-run safety.
 
 ## Verification
 
-- Current suite: 93 passed.
+- Current suite: 88 passed.
 - Directional NetCDF round-trip coverage passes.
 - A focused scalar NetCDF check confirmed that the icBuilder compression
   dictionary can save and reload integer, boolean, and floating-point fields.

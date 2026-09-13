@@ -5,7 +5,6 @@ import pytest
 
 import fuvpy.src.background as background
 from test_background_dgsigma_freeze import _synthetic_wic
-from test_background_measurement_weighting import _with_variance
 
 
 def test_monotonic_transform_preserves_temporal_ordering():
@@ -32,31 +31,23 @@ def test_monotonic_fit_is_nondecreasing_in_legacy_coordinate():
         assert np.all(np.diff(ordered_model) >= -1e-10)
 
 
-def test_normal_and_full_solvers_give_equivalent_weighted_models():
-    imgs = _with_variance(_synthetic_wic())
-    imgs["img_variance"] = 1 + np.abs(imgs["img"])
-    options = {
-        "monotonic": True,
-        "spatial_weighting": "bin_population",
-        "variance_weighted": True,
-        "input_variance": "img_variance",
-        "noise_model": "binned",
-        "dgsigma_freeze_iteration": 0,
-        "dampingVal": 1e-3,
-        "stop": 1e-5
-    }
+def test_normal_and_full_internal_solvers_are_equivalent():
+    rng = np.random.default_rng(3)
+    weighted_design = rng.normal(size=(30, 6))
+    weighted_data = rng.normal(size=30)
+    damping = 1e-3*np.eye(6)
 
-    normal = background.backgroundmodel_BS(imgs, monotonic_solver="normal", **options)
-    full = background.backgroundmodel_BS(imgs, monotonic_solver="full", **options)
+    normal = background._solve_monotonic_bs(weighted_design, weighted_data, damping, n_scp=3, n_tcp=2, solver="normal")
+    full = background._solve_monotonic_bs(weighted_design, weighted_data, damping, n_scp=3, n_tcp=2, solver="full")
 
-    np.testing.assert_allclose(normal["dgmodel"], full["dgmodel"], rtol=1e-7, atol=1e-7)
+    np.testing.assert_allclose(normal, full, rtol=1e-7, atol=1e-7)
 
 
 def test_explicitly_disabling_monotonic_fit_matches_default():
     imgs = _synthetic_wic()
 
     ordinary = background.backgroundmodel_BS(imgs, stop=1e-5)
-    explicit = background.backgroundmodel_BS(imgs, monotonic=False, monotonic_solver="full", stop=1e-5)
+    explicit = background.backgroundmodel_BS(imgs, monotonic=False, stop=1e-5)
 
     for field in ["dgmodel", "dgimg", "dgweight", "dgsigma"]:
         np.testing.assert_array_equal(explicit[field], ordinary[field])
@@ -77,7 +68,7 @@ def test_monotonic_failure_warns_and_falls_back_once(monkeypatch):
     monkeypatch.setattr(background, "_solve_monotonic_bs", fail_once)
 
     with pytest.warns(RuntimeWarning, match="all remaining IRLS iterations"):
-        result = background.backgroundmodel_BS(_synthetic_wic(), monotonic=True, monotonic_fallback=True, diagnostics=True, stop=1e-5)
+        result = background.backgroundmodel_BS(_synthetic_wic(), monotonic=True, monotonic_fallback=True, stop=1e-5)
 
     assert calls == 1
     assert int(result["dgsolver_flag"]) == 2
@@ -143,8 +134,3 @@ def test_monotonic_solver_exception_becomes_runtime_error(monkeypatch):
 
     with pytest.raises(RuntimeError, match="invalid bounded problem"):
         background._solve_monotonic_bs(weighted_design=np.eye(4), weighted_data=np.ones(4), damping=np.zeros((4, 4)), n_scp=2, n_tcp=2, solver="full")
-
-
-def test_monotonic_solver_name_is_validated():
-    with pytest.raises(ValueError, match="monotonic_solver"):
-        background.backgroundmodel_BS(_synthetic_wic(), monotonic=True, monotonic_solver="unknown")

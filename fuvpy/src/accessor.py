@@ -12,11 +12,7 @@ class FuvAccessor:
 
     # Accessors to background models
     def backgroundmodel_BS(self,**kwargs):
-        inplace = bool(kwargs.pop('inplace')) if 'inplace' in kwargs.keys() else False
-        if inplace:
-            backgroundmodel_BS(self._obj,inplace=inplace,**kwargs)
-        else:
-            return backgroundmodel_BS(self._obj,**kwargs)
+        return backgroundmodel_BS(self._obj,**kwargs)
         
     # Accessors to boundary models
     def detect_boundaries(self,**kwargs):

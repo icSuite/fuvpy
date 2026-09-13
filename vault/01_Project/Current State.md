@@ -34,13 +34,8 @@ backgroundmodel_BS(
     spatial_model="legacy_x_azimuth",
     directional_x_knots=[-3.5, 0, 1.5, 3.5],
     spencer_taper=True,
-    noise_model="binned",
-    spatial_weighting="bin_population",
-    dgsigma_freeze_iteration=0,
-    input_variance="img_variance",
     variance_weighted=True,
-    monotonic=True,
-    diagnostics=True
+    monotonic=True
 )
 ```
 
@@ -48,12 +43,14 @@ The production value of dimensionless `dampingVal` has not been selected.
 
 ## Retained revisions
 
-- `noise_model="binned"` estimates `dgsigma` from one statistic per populated
-  geometry bin rather than repeating bin statistics per pixel.
-- `spatial_weighting="bin_population"` gives each populated geometry bin equal
-  total squared influence within a frame.
-- `dgsigma_freeze_iteration=0` freezes the empirical residual scale after the
-  initial fit while later model and Tukey updates continue.
+- `dgsigma` is estimated from one statistic per populated geometry bin rather
+  than repeating bin statistics per pixel. The obsolete legacy model has been
+  removed.
+- Every populated geometry bin receives equal total squared influence within
+  a frame. The obsolete Gaussian spatial-weighting alternative has been
+  removed.
+- `dgsigma` is always estimated after the initial fit and then held fixed while
+  later model and Tukey updates continue. This is no longer configurable.
 - Tukey values enter as objective weights through `sqrt(Tukey)` row
   multipliers.
 - BS damping is scaled by the median supported positive diagonal of the
@@ -62,8 +59,8 @@ The production value of dimensionless `dampingVal` has not been selected.
   variance before optional WIC reflattening.
 - `variance_weighted=True` applies measurement precision to the BS inversion
   without including it in the empirical `dgsigma` calculation.
-- The monotonic solver has explicit success/fallback flags and optional scalar
-  convergence diagnostics.
+- The low-cost monotonic solver has explicit success/fallback flags, and every
+  result stores scalar convergence diagnostics.
 
 ## Repository cleanup
 
@@ -83,7 +80,7 @@ The retained research support is:
 
 ## Verification
 
-The current suite reports 93 passes. `img_variance` now records what it was
+The current suite reports 88 passes. `img_variance` now records what it was
 calculated from, which uncertainty sources it excludes, and the deterministic
 WIC reflattening assumption. No active source, test, or script refers to SH,
 SBS, or `asymmetric_legacy`.
@@ -96,7 +93,10 @@ Every BS result now records its effective fit configuration and scalar
 convergence state on `dgmodel`; solver outcome remains in `dgsolver_flag`.
 Focused tests confirm that these values survive NetCDF save/reload.
 `backgroundmodel_BS()` always fits `img`; the obsolete alternative `inImg`
-path has been removed.
+path has been removed. It always returns a copy and rejects the obsolete
+`inplace`, `diagnostics`, `input_variance`, `monotonic_solver`, `dzalim`, and
+`minlat` arguments. Variance-weighted fits always read `img_variance`, and
+production monotonic fits always use the low-cost normal-system solver.
 
 ## Production boundary
 
