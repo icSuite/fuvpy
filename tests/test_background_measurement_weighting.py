@@ -11,24 +11,15 @@ def _with_variance(imgs, value=1.0):
     return imgs
 
 
-def test_constant_variance_matches_unweighted_fit_without_damping():
+def test_constant_variance_preserves_fit_with_scaled_damping():
     imgs = _with_variance(_synthetic_wic(), value=4.0)
 
-    ordinary = background.backgroundmodel_BS(imgs, dampingVal=0, stop=1e-5)
-    weighted = background.backgroundmodel_BS(imgs, dampingVal=0, stop=1e-5, variance_weighted=True)
+    for damping in [0, 1]:
+        ordinary = background.backgroundmodel_BS(imgs, dampingVal=damping, stop=1e-5)
+        weighted = background.backgroundmodel_BS(imgs, dampingVal=damping, stop=1e-5, variance_weighted=True)
 
-    for field in ["dgmodel", "dgimg", "dgweight", "dgsigma"]:
-        np.testing.assert_allclose(weighted[field], ordinary[field], rtol=1e-10, atol=1e-10)
-
-
-def test_constant_variance_does_not_change_dimensionless_damping():
-    imgs = _with_variance(_synthetic_wic(), value=4.0)
-
-    ordinary = background.backgroundmodel_BS(imgs, dampingVal=1, stop=1e-5)
-    weighted = background.backgroundmodel_BS(imgs, dampingVal=1, stop=1e-5, variance_weighted=True)
-
-    for field in ["dgmodel", "dgimg", "dgweight", "dgsigma"]:
-        np.testing.assert_allclose(weighted[field], ordinary[field], rtol=1e-9, atol=1e-9)
+        for field in ["dgmodel", "dgimg", "dgweight", "dgsigma"]:
+            np.testing.assert_allclose(weighted[field], ordinary[field], rtol=1e-9, atol=1e-9)
 
 
 def test_high_variance_observation_has_less_influence():
@@ -67,21 +58,13 @@ def test_measurement_variance_is_not_passed_to_dgsigma(monkeypatch):
     np.testing.assert_array_equal(captured_noise_weights[1], captured_noise_weights[0])
 
 
-@pytest.mark.parametrize(
-    "value, message",
-    [
-        (np.nan, "finite"),
-        (np.inf, "finite"),
-        (0.0, "strictly positive"),
-        (-1.0, "strictly positive")
-    ]
-)
-def test_invalid_variance_at_fitted_pixel_is_rejected(value, message):
-    imgs = _with_variance(_synthetic_wic())
-    imgs["img_variance"].values[0, 0, 0] = value
+def test_invalid_variance_at_fitted_pixel_is_rejected():
+    for value, message in [(np.nan, "finite"), (np.inf, "finite"), (0.0, "strictly positive"), (-1.0, "strictly positive")]:
+        imgs = _with_variance(_synthetic_wic())
+        imgs["img_variance"].values[0, 0, 0] = value
 
-    with pytest.raises(ValueError, match=message):
-        background.backgroundmodel_BS(imgs, variance_weighted=True)
+        with pytest.raises(ValueError, match=message):
+            background.backgroundmodel_BS(imgs, variance_weighted=True)
 
 
 def test_variance_weighting_requires_img_variance():

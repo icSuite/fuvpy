@@ -6,9 +6,9 @@ Branch: `background_model_asymmetry`
 ## Conclusion
 
 Do not start the complete IMAGE reprocessing yet. No new numerical defect was
-confirmed in the selected directional BS path, and the cleaned local suite has
-88 passing tests. The remaining blockers are integration, validation, and
-long-run safety.
+confirmed in the selected directional BS path, and the consolidated local
+suite has 38 passing tests. The remaining blockers are integration,
+validation, and long-run safety.
 
 ## Blockers
 
@@ -48,7 +48,8 @@ long-run safety.
 
 ## Verification
 
-- Current suite: 88 passed.
+- Current suite: 38 passed after consolidating repeated cases and removing
+  validation-script plotting tests.
 - Directional NetCDF round-trip coverage passes.
 - A focused scalar NetCDF check confirmed that the icBuilder compression
   dictionary can save and reload integer, boolean, and floating-point fields.

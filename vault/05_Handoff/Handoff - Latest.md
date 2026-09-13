@@ -49,7 +49,9 @@ were removed.
 
 ## Verification
 
-`pytest -q` reports 88 passes. `img_variance` now records `calculated_from`,
+`pytest -q` reports 38 passes. The suite was reduced from 88 by consolidating
+repeated cases and removing tests of validation-script plotting plumbing while
+retaining package-level scientific and serialization coverage. `img_variance` now records `calculated_from`,
 `excludes`, and the WIC `reflattening_assumption`. The metadata fix does not
 change the variance values or background fit. No active source, test, or
 script refers to SH, SBS, or `asymmetric_legacy`.

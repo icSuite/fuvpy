@@ -80,7 +80,9 @@ The retained research support is:
 
 ## Verification
 
-The current suite reports 88 passes. `img_variance` now records what it was
+The focused suite reports 38 passes. It was consolidated from 88 by combining
+repeated error/parameter cases and removing tests of validation-script plotting
+plumbing; package-level scientific behavior remains covered. `img_variance` now records what it was
 calculated from, which uncertainty sources it excludes, and the deterministic
 WIC reflattening assumption. No active source, test, or script refers to SH,
 SBS, or `asymmetric_legacy`.

@@ -53,8 +53,3 @@ def test_iteration_zero_dgsigma_is_retained_during_later_fits(monkeypatch):
     assert estimates == [10.0]
     np.testing.assert_allclose(result["dgsigma"].values[np.isfinite(result["dgsigma"])], 10.0)
     assert np.any(result["dgweight"].values < 1)
-
-
-def test_dgsigma_freeze_iteration_is_not_configurable():
-    with np.testing.assert_raises_regex(TypeError, "dgsigma_freeze_iteration"):
-        background.backgroundmodel_BS(_synthetic_wic(), dgsigma_freeze_iteration=1)

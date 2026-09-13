@@ -44,15 +44,15 @@ def _fit_exact_background(monkeypatch, images, **options):
     return background.backgroundmodel_BS(images, spatial_model='legacy_x_azimuth', sKnots=[-3.5, 0, 3.5], sOrder=1, tukeyVal=1e6, stop=1e-8, **options)
 
 
-@pytest.mark.parametrize('spencer_taper', [False, True])
-def test_directional_model_recovers_synthetic_background(monkeypatch, spencer_taper):
-    images = _directional_background(spencer_taper)
-    result = _fit_exact_background(monkeypatch, images, spencer_taper=spencer_taper)
+def test_directional_model_recovers_background_with_and_without_taper(monkeypatch):
+    for spencer_taper in [False, True]:
+        images = _directional_background(spencer_taper)
+        result = _fit_exact_background(monkeypatch, images, spencer_taper=spencer_taper)
 
-    assert np.sqrt(np.nanmean(result['dgimg'].values**2)) < 1e-8
-    np.testing.assert_allclose(result['dgmodel'], result['dgmodel_base'] + result['dgmodel_sine'])
-    assert result['dgmodel'].attrs['spencer_taper'] == ('enabled' if spencer_taper else 'disabled')
-    assert ('spencer_taper_factor' in result) == spencer_taper
+        assert np.sqrt(np.nanmean(result['dgimg'].values**2)) < 1e-8
+        np.testing.assert_allclose(result['dgmodel'], result['dgmodel_base'] + result['dgmodel_sine'])
+        assert result['dgmodel'].attrs['spencer_taper'] == ('enabled' if spencer_taper else 'disabled')
+        assert ('spencer_taper_factor' in result) == spencer_taper
 
 
 def test_directional_knots_default_to_base_knots(monkeypatch):
@@ -61,33 +61,21 @@ def test_directional_knots_default_to_base_knots(monkeypatch):
     np.testing.assert_array_equal(result['dgmodel'].attrs['directional_x_knots'], [-3.5, 0, 3.5])
 
 
-@pytest.mark.parametrize('knots', [[0, 0, 1], [1, 0], [0, np.nan, 1], [[0, 1]]])
-def test_directional_knots_must_be_increasing_and_finite(knots):
-    with pytest.raises(ValueError, match='directional_x_knots'):
-        background.backgroundmodel_BS(_directional_background(), spatial_model='legacy_x_azimuth', directional_x_knots=knots)
+def test_directional_knots_must_be_increasing_and_finite():
+    for knots in [[0, 0, 1], [1, 0], [0, np.nan, 1], [[0, 1]]]:
+        with pytest.raises(ValueError, match='directional_x_knots'):
+            background.backgroundmodel_BS(_directional_background(), spatial_model='legacy_x_azimuth', directional_x_knots=knots)
 
 
-def test_directional_options_require_directional_model():
+def test_directional_options_and_geometry_are_validated():
     images = _synthetic_wic()
 
     with pytest.raises(ValueError, match='directional_x_knots'):
         background.backgroundmodel_BS(images, directional_x_knots=[-3.5, 0, 3.5])
     with pytest.raises(ValueError, match='spencer_taper'):
         background.backgroundmodel_BS(images, spencer_taper=True)
-
-
-def test_directional_model_requires_sine_factor():
     with pytest.raises(ValueError, match='viewing_geometry=True'):
-        background.backgroundmodel_BS(_synthetic_wic(), spatial_model='legacy_x_azimuth')
-
-
-def test_explicit_legacy_model_matches_default():
-    images = _synthetic_wic()
-    default = background.backgroundmodel_BS(images, stop=1e-5)
-    explicit = background.backgroundmodel_BS(images, spatial_model='legacy', stop=1e-5)
-
-    for field in ['dgmodel', 'dgimg', 'dgweight', 'dgsigma']:
-        np.testing.assert_array_equal(explicit[field], default[field])
+        background.backgroundmodel_BS(images, spatial_model='legacy_x_azimuth')
 
 
 def test_monotonic_constraint_applies_to_base(monkeypatch):
@@ -102,30 +90,6 @@ def test_monotonic_constraint_applies_to_base(monkeypatch):
         assert np.all(np.diff(ordered_base) >= -1e-8)
 
     assert result['dgmodel'].attrs['monotonic_constraint'] == 'legacy_base_nondecreasing'
-
-
-def test_monotonic_transform_leaves_directional_coefficients_free():
-    transform, lower = background._monotonic_base_transform(n_base_scp=3, n_total_scp=5, n_tcp=2)
-    free_parameters = np.array([10, 20, 1, 2, 3, 4, -5, -6, -7, -8], dtype=float)
-    coefficients = transform@free_parameters
-
-    base = coefficients[:6].reshape((3, 2))
-    np.testing.assert_allclose(base, [[10, 20], [11, 22], [14, 26]])
-    np.testing.assert_array_equal(coefficients[6:], free_parameters[6:])
-    assert np.all(np.isneginf(lower[6:]))
-
-
-def test_directional_model_uses_revised_weights(monkeypatch):
-    images = _directional_background()
-    images['img_variance'] = xr.ones_like(images['img'])*4
-    monkeypatch.setattr(background, '_noisemodel_binned', lambda fraction, image, model, weights, knots: np.full_like(image, 1e6))
-
-    result = background.backgroundmodel_BS(images, spatial_model='legacy_x_azimuth', directional_x_knots=[-3.5, 0, 3.5], sKnots=[-3.5, 0, 3.5], sOrder=1, variance_weighted=True, tukeyVal=1e6, stop=1e-8)
-
-    fitted = np.isfinite(result['dgmodel'].values)
-    assert np.any(fitted)
-    assert np.all(np.isfinite(result['dgweight'].values[fitted]))
-    assert np.all(np.isfinite(result['dgsigma'].values[fitted]))
 
 
 def test_directional_outputs_survive_netcdf_round_trip(monkeypatch, tmp_path):

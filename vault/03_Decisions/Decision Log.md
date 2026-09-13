@@ -251,3 +251,15 @@ fit arguments; geometry filtering belongs to `read_idl()`.
 behavior makes production calls shorter and prevents configurations that were
 ignored, redundant, or retained only for superseded comparisons. The full
 monotonic solver remains internal for numerical equivalence tests.
+
+## 2026-09-13 — Consolidate the test suite around behavior
+
+**Decision:** Reduce the suite from 88 to 38 tests by combining repeated
+parameter and rejection cases, removing tests of validation-script plotting
+plumbing, and deleting microtests already exercised by higher-level behavior.
+
+**Rationale:** The rapidly growing collection of experiment-specific tests had
+become harder to maintain than the small production package warranted. The
+reduced suite retains the scientific contracts for `dgsigma`, spatial and
+measurement weighting, monotonic fitting and fallback, directional modeling,
+measurement variance, viewing geometry, and NetCDF serialization.

@@ -5,7 +5,7 @@ from fuvpy.src.background import _bin_population_weights
 SPATIAL_BINS = np.arange(-0.2, 0.3 + 0.1, 0.1)
 
 
-def test_pixels_share_bin_weight_and_bins_have_equal_influence():
+def test_bin_population_weights_equalize_bins_independently_per_frame():
     fraction = np.array([[-0.15, -0.14, -0.13, 0.05, 0.06, 0.25]])
     valid = np.ones_like(fraction, dtype=bool)
 
@@ -22,8 +22,6 @@ def test_pixels_share_bin_weight_and_bins_have_equal_influence():
     np.testing.assert_allclose(influence, influence[0])
     np.testing.assert_allclose(np.mean(weights[valid]**2), 1)
 
-
-def test_bin_population_weights_are_calculated_per_frame():
     fraction = np.array([[0.01, 0.02, 0.11], [0.01, 0.11, 0.12]])
     valid = np.ones_like(fraction, dtype=bool)
 

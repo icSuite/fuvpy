@@ -12,33 +12,19 @@ from fuvpy.src.measurement_uncertainty import (
 )
 
 
-def test_si_measurement_variance_and_low_count_offset():
+def test_measurement_variance_equations():
     image = np.array([10.0, 0.0])
     multiplier = np.array([1.18, 1.18])
-
-    variance = si_measurement_variance(image, multiplier, poisson_offset=0.5)
-
-    np.testing.assert_allclose(variance, multiplier*image + 0.5*multiplier**2)
-
-
-def test_wic_reference_variance_and_low_count_offset():
-    image = np.array([10.0, 0.0])
     coefficient = 4*0.1*612.6/23
 
-    variance = wic_measurement_variance(image, poisson_offset=0.5)
-
+    np.testing.assert_allclose(si_measurement_variance(image, multiplier, poisson_offset=0.5), multiplier*image + 0.5*multiplier**2)
     np.testing.assert_allclose(wic_variance_coefficient(), coefficient)
-    np.testing.assert_allclose(variance, coefficient*image + 0.5*coefficient**2)
+    np.testing.assert_allclose(wic_measurement_variance(image, poisson_offset=0.5), coefficient*image + 0.5*coefficient**2)
 
-
-def test_wic_correction_aware_variance_uses_calibration_multiplier():
-    image = np.array([10.0, 0.0])
-    multiplier = np.array([1.0, 1.5])
-    coefficient = wic_variance_coefficient()*multiplier
-
-    variance = wic_measurement_variance(image, poisson_offset=0.5, multiplier=multiplier)
-
-    np.testing.assert_allclose(variance, coefficient*image + 0.5*coefficient**2)
+    correction_multiplier = np.array([1.0, 1.5])
+    corrected_coefficient = coefficient*correction_multiplier
+    corrected_variance = wic_measurement_variance(image, poisson_offset=0.5, multiplier=correction_multiplier)
+    np.testing.assert_allclose(corrected_variance, corrected_coefficient*image + 0.5*corrected_coefficient**2)
 
 
 def test_packaged_tables_select_representative_mission_multipliers():
@@ -51,10 +37,10 @@ def test_packaged_tables_select_representative_mission_multipliers():
     np.testing.assert_allclose(multiplier[0, :, 0], multiplier[0, :, -1])
 
 
-@pytest.mark.parametrize("value", [-1, np.inf, "invalid"])
-def test_poisson_offset_must_be_nonnegative_and_finite(value):
-    with pytest.raises(ValueError, match="non-negative number"):
-        si_measurement_variance([1.0], [1.0], poisson_offset=value)
+def test_poisson_offset_must_be_nonnegative_and_finite():
+    for value in [-1, np.inf, "invalid"]:
+        with pytest.raises(ValueError, match="non-negative number"):
+            si_measurement_variance([1.0], [1.0], poisson_offset=value)
 
 
 def _measurement_dataset(sensor="SI12"):
@@ -102,23 +88,19 @@ def test_wic_correction_aware_model_is_selectable_when_loading(monkeypatch):
     assert result["img_variance"].attrs["wic_variance_model"] == "correction_aware"
 
 
-def test_invalid_wic_variance_model_is_rejected():
+def test_unsupported_variance_configurations_are_rejected():
     with pytest.raises(ValueError, match="reference.*correction_aware"):
         load._add_measurement_variance(_measurement_dataset("WIC"), calibration_flags=[1], airglow_scales=[[0, 0, 0]], poisson_offset=0.5, wic_variance_model="invalid")
 
-
-@pytest.mark.parametrize(
-    "sensor, flag, airglow, message",
-    [
+    invalid_states = [
         ("SI12", 3, [0, 0, 0], "calibration flag 1"),
         ("WIC", 2, [0, 0, 0], "calibration flag 1 or 3"),
         ("SI13", 1, [1, 0, 0], "without FUVVIEW3 airglow"),
         ("VIS", 1, [0, 0, 0], "implemented for WIC, SI12, and SI13")
     ]
-)
-def test_unsupported_calibration_states_are_rejected(sensor, flag, airglow, message):
-    with pytest.raises(ValueError, match=message):
-        load._add_measurement_variance(_measurement_dataset(sensor), calibration_flags=[flag], airglow_scales=[airglow], poisson_offset=0)
+    for sensor, flag, airglow, message in invalid_states:
+        with pytest.raises(ValueError, match=message):
+            load._add_measurement_variance(_measurement_dataset(sensor), calibration_flags=[flag], airglow_scales=[airglow], poisson_offset=0)
 
 
 def _mock_imageinfo(include_calibration=True):
@@ -142,7 +124,7 @@ def _mock_imageinfo(include_calibration=True):
     return imageinfo
 
 
-def test_read_idl_variance_precedes_optional_wic_reflattening(monkeypatch):
+def test_read_idl_variance_order_and_default_behavior(monkeypatch):
     monkeypatch.setattr(load, "readsav", lambda filename: {"imageinfo": _mock_imageinfo()})
     monkeypatch.setattr(load, "calibration_multiplier", lambda dates, sensor: np.ones((1, 2, 2)))
 
@@ -161,10 +143,7 @@ def test_read_idl_variance_precedes_optional_wic_reflattening(monkeypatch):
     assert result["img_variance"].attrs["calculated_from"] == "img before optional WIC reflattening"
     assert "deterministic" in result["img_variance"].attrs["reflattening_assumption"]
 
-
-def test_read_idl_default_does_not_require_calibration_fields(monkeypatch):
     monkeypatch.setattr(load, "readsav", lambda filename: {"imageinfo": _mock_imageinfo(include_calibration=False)})
-
     result = load.read_idl("mock.idl", remove_bad=False, reflat=False)
 
     assert "img_variance" not in result
