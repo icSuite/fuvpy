@@ -7,7 +7,7 @@ Branch: `background_model_asymmetry`
 
 Do not start the complete IMAGE reprocessing yet. No new numerical defect was
 confirmed in the selected directional BS path, and the cleaned local suite has
-88 passing tests. The remaining blockers are integration, validation, and
+90 passing tests. The remaining blockers are integration, validation, and
 long-run safety.
 
 ## Blockers
@@ -31,9 +31,6 @@ long-run safety.
 
 ## Repairs before the pilot
 
-- Restore `img_variance` metadata removed from `read_idl`: `excludes`,
-  `calculated_from`, and `reflattening_assumption`. The current validation
-  script otherwise rejects WIC variance produced by the current loader.
 - Enable and inspect `dgfit_iterations`, `dgfit_converged`, and
   `dgsolver_flag` in production outputs.
 - Choose a monotonic-failure policy. If ordinary fallback is enabled, correct
@@ -51,8 +48,7 @@ long-run safety.
 
 ## Verification
 
-- Current suite: 88 passed and two failed. Both failures concern missing
-  measurement-variance metadata.
+- Current suite: 90 passed.
 - Directional NetCDF round-trip coverage passes.
 - A focused scalar NetCDF check confirmed that the icBuilder compression
   dictionary can save and reload integer, boolean, and floating-point fields.
@@ -61,7 +57,6 @@ long-run safety.
 
 ## Next action
 
-Repair the metadata and production runner, remove its obsolete SH stage, then
-process 3--5 complete representative orbits through BS, save, and reload.
+Process 3--5 complete representative orbits through BS, save, and reload.
 Inspect convergence, solver flags, scientific fields, runtime, and memory;
-select BS damping before launching the complete corpus.
+select BS damping before updating the downstream production runner.

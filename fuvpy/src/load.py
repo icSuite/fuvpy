@@ -253,9 +253,12 @@ def _add_measurement_variance(imgs, calibration_flags, airglow_scales, poisson_o
         'long_name': 'Conditional detector measurement variance of img',
         'units': variance_units,
         'model': variance_model,
-        'poisson_offset': float(poisson_offset)}
+        'poisson_offset': float(poisson_offset),
+        'calculated_from': 'img before optional WIC reflattening',
+        'excludes': 'calibration uncertainty, background-model discrepancy, and atmospheric-response uncertainty'}
     if sensor == 'WIC':
         imgs['img_variance'].attrs['wic_variance_model'] = wic_variance_model
+        imgs['img_variance'].attrs['reflattening_assumption'] = 'WIC reflattening is treated as a deterministic additive adjustment; img_variance is retained unchanged'
 
     return imgs
 

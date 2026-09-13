@@ -83,22 +83,21 @@ The retained research support is:
 
 ## Verification
 
-The current suite reports 88 passes and two known failures. Both failures are
-missing `img_variance` metadata: `excludes` and
-`reflattening_assumption`. No active source, test, or script refers to SH,
+The current suite reports 90 passes. `img_variance` now records what it was
+calculated from, which uncertainty sources it excludes, and the deterministic
+WIC reflattening assumption. No active source, test, or script refers to SH,
 SBS, or `asymmetric_legacy`.
 
 ## Production boundary
 
 Do not start complete IMAGE processing yet:
 
-1. Restore the required measurement-variance metadata.
+1. Run 3--5 complete representative orbits, inspect convergence and scientific
+   fields, and select BS damping.
 2. Update icBuilder to call the revised loader and BS-only model and to use
    `dgimg`/`dgweight` instead of SH fields.
 3. Make the orbit runner interruption-safe with atomic saving and output
    validation.
-4. Run 3--5 complete representative orbits, inspect convergence and scientific
-   fields, and select BS damping before launching the complete corpus.
 
 Detailed decisions, algorithms, and audit evidence remain in the dedicated
 vault notes rather than this live status file.

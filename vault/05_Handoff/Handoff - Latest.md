@@ -54,15 +54,10 @@ were removed.
 
 ## Verification
 
-`pytest -q` reports 88 passes and two failures. The failures predate this
-cleanup and both concern missing `img_variance` metadata:
-
-- `excludes`; and
-- `reflattening_assumption`.
-
-Imports, retained script paths, and the BS-only public API are otherwise
-intact. No active source, test, or script refers to SH, SBS, or
-`asymmetric_legacy`.
+`pytest -q` reports 90 passes. `img_variance` now records `calculated_from`,
+`excludes`, and the WIC `reflattening_assumption`. The metadata fix does not
+change the variance values or background fit. No active source, test, or
+script refers to SH, SBS, or `asymmetric_legacy`.
 
 ## Downstream incompatibility
 
@@ -72,10 +67,9 @@ reader are changed to the BS-only fields.
 
 ## Next action
 
-1. Restore the two required measurement-variance metadata fields.
+1. Run a 3--5-orbit complete fuvpy pilot and select dimensionless BS damping.
 2. Update icBuilder to use the revised loader and BS-only background call.
 3. Add atomic saving and restart validation to the orbit runner.
-4. Run a 3--5-orbit complete pilot and select dimensionless BS damping.
 
 The production-readiness audit is in
 `vault/03_Validation/Production Readiness Audit - 2026-09-12.md`.

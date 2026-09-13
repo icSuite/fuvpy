@@ -85,6 +85,7 @@ def test_si_variance_follows_image_dimensions_mask_and_metadata(monkeypatch):
     np.testing.assert_allclose(result["img_variance"], expected)
     assert np.isnan(result["calibration_multiplier"][0, 1, 0])
     assert result["img_variance"].attrs["poisson_offset"] == 0.5
+    assert result["img_variance"].attrs["calculated_from"] == "img before optional WIC reflattening"
     assert "calibration uncertainty" in result["img_variance"].attrs["excludes"]
 
 
@@ -157,6 +158,7 @@ def test_read_idl_variance_precedes_optional_wic_reflattening(monkeypatch):
     np.testing.assert_allclose(result["img"], 110.0)
     np.testing.assert_allclose(result["img_variance"], coefficient*10.0 + 0.5*coefficient**2)
     assert int(result["calibration_flag"][0]) == 3
+    assert result["img_variance"].attrs["calculated_from"] == "img before optional WIC reflattening"
     assert "deterministic" in result["img_variance"].attrs["reflattening_assumption"]
 
 
