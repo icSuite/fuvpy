@@ -45,7 +45,7 @@ All-NaN failure products record `dgfit_converged=False`, even when the optional
 diagnostics were not requested. `dgsolver_flag` stores the solver outcome and
 the solver error message is retained in its metadata.
 
-## 4. Make each BS result self-describing — pending (next)
+## 4. Make each BS result self-describing — complete
 
 Save the configuration needed to understand and reproduce each background fit,
 including at least:
@@ -60,11 +60,19 @@ including at least:
 - damping value; and
 - convergence and solver diagnostics.
 
-Verify that these fields and attributes survive an xarray NetCDF save/reload
-round trip. This concerns fuvpy output content, not the later icBuilder restart
-mechanism.
+The effective configuration is stored on `dgmodel`. It includes the spatial
+model, spline breakpoints and orders, noise and spatial weights,
+`dgsigma` freeze iteration, Tukey setting, measurement-variance configuration,
+monotonic configuration, Spencer taper, dimensionless damping, the actual
+normal-matrix damping scale, convergence tolerance, iteration count, and
+convergence status. Solver outcome and error information remain on
+`dgsolver_flag`.
 
-## 5. Run the complete-orbit pilot and select damping — pending
+Focused tests confirm that the configuration and solver flags survive an
+xarray NetCDF save/reload round trip. This concerns fuvpy output content, not
+the later icBuilder restart mechanism.
+
+## 5. Run the complete-orbit pilot and select damping — pending (next)
 
 Process 3--5 complete representative orbits with the intended production
 configuration. Short extracted sequences are insufficient because temporal

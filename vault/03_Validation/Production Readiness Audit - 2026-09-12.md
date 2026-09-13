@@ -36,7 +36,8 @@ long-run safety.
 - The monotonic-failure policy is implemented. Ordinary fallback is optional;
   all failure paths return explicit flags without terminating processing, and
   `monotonic_constraint` reflects the saved result.
-- Record the actual BS configuration in each output file.
+- The actual BS configuration is now recorded on `dgmodel` and verified across
+  a NetCDF save/reload round trip.
 
 ## Known non-blockers
 
@@ -48,7 +49,7 @@ long-run safety.
 
 ## Verification
 
-- Current suite: 91 passed.
+- Current suite: 93 passed.
 - Directional NetCDF round-trip coverage passes.
 - A focused scalar NetCDF check confirmed that the icBuilder compression
   dictionary can save and reload integer, boolean, and floating-point fields.
@@ -57,7 +58,6 @@ long-run safety.
 
 ## Next action
 
-First make each BS result record its complete fit configuration. Then process
-3--5 complete representative orbits through BS, save, and reload. Inspect
-convergence, solver flags, scientific fields, runtime, and memory; select BS
-damping before updating the downstream production runner.
+Process 3--5 complete representative orbits through BS, save, and reload.
+Inspect convergence, solver flags, scientific fields, runtime, and memory;
+select BS damping before updating the downstream production runner.

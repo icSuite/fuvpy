@@ -83,7 +83,7 @@ The retained research support is:
 
 ## Verification
 
-The current suite reports 91 passes. `img_variance` now records what it was
+The current suite reports 93 passes. `img_variance` now records what it was
 calculated from, which uncertainty sources it excludes, and the deterministic
 WIC reflattening assumption. No active source, test, or script refers to SH,
 SBS, or `asymmetric_legacy`.
@@ -92,11 +92,17 @@ Monotonic solver failures no longer terminate processing. A successful
 ordinary fallback is flagged separately from an all-NaN failed product, and
 the saved monotonic metadata describes the result actually returned.
 
+Every BS result now records its effective fit configuration and scalar
+convergence state on `dgmodel`; solver outcome remains in `dgsolver_flag`.
+Focused tests confirm that these values survive NetCDF save/reload.
+`backgroundmodel_BS()` always fits `img`; the obsolete alternative `inImg`
+path has been removed.
+
 ## Production boundary
 
 Do not start complete IMAGE processing yet:
 
-1. Complete points 4--6 of
+1. Complete points 5--6 of
    `vault/03_Validation/FUVPY Production Reprocessing Checklist.md`.
 2. Update icBuilder to call the revised loader and BS-only model and to use
    `dgimg`/`dgweight` instead of SH fields.

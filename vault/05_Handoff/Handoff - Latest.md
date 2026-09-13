@@ -54,7 +54,7 @@ were removed.
 
 ## Verification
 
-`pytest -q` reports 91 passes. `img_variance` now records `calculated_from`,
+`pytest -q` reports 93 passes. `img_variance` now records `calculated_from`,
 `excludes`, and the WIC `reflattening_assumption`. The metadata fix does not
 change the variance values or background fit. No active source, test, or
 script refers to SH, SBS, or `asymmetric_legacy`.
@@ -65,6 +65,14 @@ terminating processing. Flags distinguish successful fallback, no fallback,
 and failed fallback, and the saved monotonic metadata reflects the returned
 fit.
 
+`dgmodel` now stores the effective BS configuration, including spline
+breakpoints and orders, weighting and variance settings, monotonic settings,
+damping value and scale, iteration count, and convergence state. The metadata
+and solver flags survive NetCDF save/reload.
+
+`backgroundmodel_BS()` now always fits `img`. The obsolete `inImg` option and
+its redundant metadata were removed.
+
 ## Downstream incompatibility
 
 icBuilder still calls `backgroundmodel_SH()` and expects `shimg` and
@@ -74,10 +82,10 @@ reader are changed to the BS-only fields.
 ## Next action
 
 Use `vault/03_Validation/FUVPY Production Reprocessing Checklist.md` as the
-numbered source of truth. Points 1--3 are complete. Point 4, making each BS
-result self-describing, is next.
+numbered source of truth. Points 1--4 are complete. Point 5, the complete-orbit
+pilot and damping selection, is next.
 
-After points 4--6 are complete:
+After points 5--6 are complete:
 
 1. Update icBuilder to use the revised loader and BS-only background call.
 2. Add atomic saving and restart validation to the orbit runner.

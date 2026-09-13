@@ -149,3 +149,12 @@ def test_directional_outputs_survive_netcdf_round_trip(monkeypatch, tmp_path):
         np.testing.assert_allclose(loaded[field], result[field])
     assert loaded['dgmodel'].attrs['spatial_model'] == 'legacy_x_azimuth'
     assert loaded['dgmodel'].attrs['spencer_taper'] == 'enabled'
+    np.testing.assert_array_equal(loaded['dgmodel'].attrs['spatial_knots'], [-3.5, 0, 3.5])
+    np.testing.assert_array_equal(loaded['dgmodel'].attrs['directional_x_knots'], [-3.5, 0, 3.5])
+    np.testing.assert_array_equal(loaded['dgmodel'].attrs['temporal_knots_minutes_from_first_image'], [0, 4])
+    assert loaded['dgmodel'].attrs['spatial_order'] == 1
+    assert loaded['dgmodel'].attrs['fit_iterations'] == result['dgmodel'].attrs['fit_iterations']
+    for name in ['temporal_knot_count', 'temporal_order', 'noise_model', 'spatial_weighting', 'dgsigma_freeze_iteration', 'robust_weighting', 'tukey_value', 'input_variance', 'variance_weighted', 'monotonic_requested', 'monotonic_constraint', 'monotonic_solver', 'monotonic_fallback', 'damping_value', 'damping_scale', 'convergence_tolerance', 'maximum_iterations', 'fit_converged']:
+        assert loaded['dgmodel'].attrs[name] == result['dgmodel'].attrs[name]
+    assert int(loaded['dgsolver_flag']) == int(result['dgsolver_flag'])
+    np.testing.assert_array_equal(loaded['dgsolver_flag'].attrs['flag_values'], [0, 1, 2, 3, 4])

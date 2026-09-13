@@ -158,8 +158,6 @@ def backgroundmodel_BS(imgs,**kwargs):
     ----------
     imgs : xarray.Dataset
         Dataset with the FUV images, imported by readFUVimage()
-    inImg : str, optional
-        Name of the input image to be used in the model. The default is 'img'.
     sOrder : int, optional
         Order of the spatial spline fit. The default is 3.
     dampingVal : float, optional
@@ -249,7 +247,6 @@ def backgroundmodel_BS(imgs,**kwargs):
     '''
 
     # Set keyword arguments to input or default values    
-    inImg = kwargs.pop('inImg') if 'inImg' in kwargs.keys() else 'img'
     sOrder = kwargs.pop('sOrder') if 'sOrder' in kwargs.keys() else 3
     dampingVal = kwargs.pop('dampingVal') if 'dampingVal' in kwargs.keys() else 0
     tukeyVal = kwargs.pop('tukeyVal') if 'tukeyVal' in kwargs.keys() else 5
@@ -348,11 +345,12 @@ def backgroundmodel_BS(imgs,**kwargs):
 
     # Temporal knots
     if n_t==1:
-        tKnots = np.linspace(time[0], time[-1]+1, n_tKnots)
+        temporal_breaks = np.linspace(time[0], time[-1]+1, n_tKnots)
+        tKnots = temporal_breaks
         tOrder = 0
     else:
-        tKnots = np.linspace(time[0], time[-1], n_tKnots)
-        tKnots = np.r_[np.repeat(tKnots[0],tOrder),tKnots, np.repeat(tKnots[-1],tOrder)]
+        temporal_breaks = np.linspace(time[0], time[-1], n_tKnots)
+        tKnots = np.r_[np.repeat(temporal_breaks[0],tOrder),temporal_breaks, np.repeat(temporal_breaks[-1],tOrder)]
 
     # Number of control points
     n_tcp = len(tKnots)-tOrder-1
@@ -387,7 +385,7 @@ def backgroundmodel_BS(imgs,**kwargs):
     G_s=np.vstack(G_s)
 
     # Index of data to use in model
-    fit_support = (sza >= 0) & (np.isfinite(imgs[inImg].stack(z=('row','col')).values)) & (fraction>sKnots[0]) & (fraction<sKnots[-1])
+    fit_support = (sza >= 0) & (np.isfinite(imgs['img'].stack(z=('row','col')).values)) & (fraction>sKnots[0]) & (fraction<sKnots[-1])
     if directional_model:
         fit_support &= np.isfinite(solar_view_sine) & np.isfinite(directional_taper)
         fit_support &= (fraction>directional_x_knots[0]) & (fraction<directional_x_knots[-1])
@@ -405,7 +403,7 @@ def backgroundmodel_BS(imgs,**kwargs):
         ws = _bin_population_weights(fraction, fit_support, spatial_bins)
 
     # Make everything flat
-    d_s = imgs[inImg].stack(z=('row','col')).values.flatten()
+    d_s = imgs['img'].stack(z=('row','col')).values.flatten()
     ind = fit_support.flatten()
     ws = ws.flatten()
     w = np.ones_like(d_s)
@@ -527,7 +525,7 @@ def backgroundmodel_BS(imgs,**kwargs):
         normM = np.sqrt(np.average(m_s**2))
         normR = np.sqrt(np.average(residuals**2,weights=w[ind]))
         imgs['dgmodel'] = (['date','row','col'],(dm).reshape((n_t,len(imgs.row),len(imgs.col))))
-        imgs['dgimg'] = imgs[inImg]-imgs['dgmodel']
+        imgs['dgimg'] = imgs['img']-imgs['dgmodel']
         imgs['dgweight'] = (['date','row','col'],(w).reshape((n_t,len(imgs.row),len(imgs.col))))
         imgs['dgsigma'] = (['date','row','col'],(sigma).reshape((n_t,len(imgs.row),len(imgs.col))))
         imgs['dgnorm_residual'] = normR
@@ -538,9 +536,10 @@ def backgroundmodel_BS(imgs,**kwargs):
     imgs['dgsolver_flag'] = solver_flag
     if directional_model and spencer_taper:
         imgs['spencer_taper_factor'] = (['date','row','col'],directional_taper.reshape((n_t,len(imgs.row),len(imgs.col))))
+    fit_converged = False if fit_failed else iteration < 100 and np.isfinite(diff) and diff <= stop
     if diagnostics or fit_failed:
         imgs['dgfit_iterations'] = iteration
-        imgs['dgfit_converged'] = False if fit_failed else iteration < 100 and np.isfinite(diff) and diff <= stop
+        imgs['dgfit_converged'] = fit_converged
 
     # Do not return extrapolated models or fitting weights outside the pixels
     # that actually contributed to the inverse problem.
@@ -559,7 +558,33 @@ def backgroundmodel_BS(imgs,**kwargs):
         monotonic_constraint = 'legacy_base_nondecreasing' if directional_model else 'legacy_coordinate_nondecreasing'
     elif solver_flag in [3, 4]:
         monotonic_constraint = 'not_available'
-    imgs['dgmodel'].attrs = {'long_name': 'BS model', 'spatial_model': spatial_model, 'monotonic_constraint': monotonic_constraint}
+    imgs['dgmodel'].attrs = {
+        'long_name': 'BS model',
+        'spatial_model': spatial_model,
+        'spatial_knots': base_breaks,
+        'spatial_order': int(sOrder),
+        'temporal_knots_minutes_from_first_image': temporal_breaks,
+        'temporal_knot_count': int(len(temporal_breaks)),
+        'temporal_order': int(tOrder),
+        'noise_model': noise_model,
+        'spatial_weighting': spatial_weighting,
+        'dgsigma_freeze_iteration': int(dgsigma_freeze_iteration),
+        'robust_weighting': 'tukey_bisquare',
+        'tukey_value': float(tukeyVal),
+        'input_variance': 'none' if input_variance is None else str(input_variance),
+        'variance_weighted': 'true' if variance_weighted else 'false',
+        'monotonic_requested': 'true' if monotonic else 'false',
+        'monotonic_constraint': monotonic_constraint,
+        'monotonic_solver': monotonic_solver,
+        'monotonic_fallback': 'true' if monotonic_fallback else 'false',
+        'spencer_taper': 'enabled' if spencer_taper else 'disabled',
+        'damping_value': float(dampingVal),
+        'damping_scale': float(gtg_magnitude),
+        'convergence_tolerance': float(stop),
+        'maximum_iterations': 100,
+        'fit_iterations': int(iteration),
+        'fit_converged': int(fit_converged)
+    }
     imgs['dgimg'].attrs = {'long_name': 'BS corrected image'}
     imgs['dgweight'].attrs = {'long_name': 'BS model weights'}
     imgs['dgsigma'].attrs = {'long_name': 'BS model spread'}
@@ -573,7 +598,6 @@ def backgroundmodel_BS(imgs,**kwargs):
     }
     if directional_model:
         imgs['dgmodel'].attrs['directional_x_knots'] = directional_x_breaks
-        imgs['dgmodel'].attrs['spencer_taper'] = 'enabled' if spencer_taper else 'disabled'
         imgs['dgmodel_base'].attrs = {'long_name': 'Azimuth-independent legacy-coordinate background component'}
         imgs['dgmodel_sine'].attrs = {'long_name': 'Sine-like solar-view directional background component'}
         if spencer_taper:
