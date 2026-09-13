@@ -6,7 +6,7 @@ import pytest
 import xarray as xr
 
 
-SCRIPT_PATH = Path(__file__).resolve().parents[1] / "examples" / "scripts" / "validate_background_revision.py"
+SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "validate_background_revision.py"
 SPEC = importlib.util.spec_from_file_location("validate_background_revision", SCRIPT_PATH)
 validation = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(validation)

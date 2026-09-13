@@ -1,5 +1,17 @@
 # Decision Log
 
+## 2026-09-12 — Remove obsolete examples and rejected model paths
+
+**Decision:** Remove the article-specific examples and generated comparison
+figures, and retain only the three scripts and detector sequences used for
+current BS validation. Also remove the rejected compressed-nightside
+`asymmetric_legacy` option. The only retained asymmetry is
+`spatial_model="legacy_x_azimuth"`.
+
+**Rationale:** The article examples describe an algorithm that is no longer
+the active method. Keeping generated outputs and two meanings of “asymmetry”
+made the repository larger and the scientific interface less clear.
+
 ## 2026-09-12 — Retire the SH and SBS background paths
 
 **Decision:** The active fuvpy background-removal architecture consists only

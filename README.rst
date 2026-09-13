@@ -46,14 +46,15 @@ identity regularization by the median supported positive diagonal of
 through IRLS. Historical numerical
 damping values therefore need to be retuned.
 
-``backgroundmodel_BS(..., asymmetric_legacy=True)`` keeps the legacy
-``cos(SZA)/cos(DZA)`` coordinate unchanged on the dayside and maps negative
-values to ``nightside_width*tanh(x/nightside_width)``. The default width is
-0.2. Its default spatial-knot path is experimental and currently deferred.
-Custom
-``sKnots`` remain authoritative. The released coordinate is unchanged by the
-default ``asymmetric_legacy=False`` setting, and this option is unavailable
-for VIS.
+Directional background model
+============================
+``backgroundmodel_BS(..., spatial_model="legacy_x_azimuth")`` adds a smooth
+directional correction to the ordinary background model. Load IDL files with
+``viewing_geometry=True`` so the required solar-view factors are available.
+``spencer_taper=True`` limits the directional term using the Spencer
+spherical-Chapman profile. The returned dataset stores ``dgmodel_base`` and
+``dgmodel_sine`` separately while ``dgmodel`` and ``dgimg`` contain the
+combined result.
 
 ``backgroundmodel_BS(..., monotonic=True)`` optionally constrains each
 temporal component's spatial B-spline coefficients to be non-decreasing with
@@ -96,14 +97,8 @@ Install
 =======
 Clone the repository::
 
-    git clone https://github.com/aohma/fuvpy
+    git clone https://github.com/icSuite/fuvpy.git
 
-Use or create a virtual environment with ``conda`` or ``mamba`` where all dependencies are installed.
-A working environment is also provided in the repository. Here we create an environment called ``fuvpy-env`` as an example::
-
-    conda env create --name fuvpy-env --file fuvpy/binder/fuvpy-env.yml
-    conda activate fuvpy-env
-
-Use pip to install in editable (development) mode::
+Use an existing scientific Python environment and install in editable mode::
     
-    pip install -e ./fuvpy
+    python -m pip install -e ./fuvpy

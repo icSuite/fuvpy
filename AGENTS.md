@@ -74,9 +74,8 @@ live notes when the task changes project understanding.
   sequence behind a generic solver framework.
 - Make units, coefficient ordering, design-matrix construction, regularization,
   convergence, and uncertainty interpretation explicit.
-- Do not overwrite tracked examples or generated figures during exploratory
-  runs. Use a scratch directory and begin with the bundled WIC sequence or a
-  copied complete orbit.
+- Keep generated figures outside version control. Begin exploratory work with
+  the bundled validation sequences or a copied complete orbit.
 - Do not run a large external IMAGE corpus, download data, install packages,
   push branches, or alter upstream remotes unless the user explicitly places
   that action in scope.

@@ -2,286 +2,80 @@
 
 Last updated: 2026-09-12
 Branch: `background_model_asymmetry`
-Checkpoint: BS-only sine-directional model implemented; SH/SBS retired
-Validation: 21 focused tests pass; complete suite has 100 passes and 3 known parent-branch failures
+Checkpoint: repository reduced to the BS-only background architecture
 
-## Production boundary
+## What is implemented
 
-A production-readiness audit on 2026-09-12 found no new numerical defect in
-the selected directional BS path, but the complete IMAGE rerun must not start
-yet. The icBuilder orbit runner is still wired to the old configuration and
-obsolete SH stage, dimensionless BS damping remains unselected, complete-orbit
-BS validation is missing, and the runner writes final files without atomic
-save or restart validation. `read_idl` also lacks the variance provenance
-fields required by the WIC validation script. See
-`vault/03_Validation/Production Readiness Audit - 2026-09-12.md`.
-
-## Historical comparison reference
-
-The large pre-revision orbit files are no longer needed inside the repository.
-Run `python examples/scripts/extract_legacy_background.py` to extract the four
-BS fields used by `compare_models.py` at the bundled IDL times. Compact WIC,
-SI12, and SI13 references are complete under `data/legacy_background/`; each
-contains all 58 example frames and the three files occupy about 28 MB total.
-
-`compare_models.py` selects the compact historical frames by exact timestamp
-and displays them as a separate row before the models fitted by the current
-code. This is the authoritative old-result comparison and avoids emulating
-the previous Tukey, damping, and noise-model implementation inside the revised
-solver.
-
-The old files were fitted to complete orbits, not the extracted example
-segments. In particular, orbit 968 used 326 frames spanning 14:00--01:09,
-while the current example has only three frames near 23:39. The old BS fit was
-unconstrained but happens to be monotonic in the displayed frames; absence of
-visible non-monotonicity is not evidence that a monotonic solver was used.
-
-## Directional implementation
-
-The plan in `vault/02_Algorithm/Directional Background Model Implementation
-Plan.md` is implemented through focused verification. The branch contains
-only the geometry calculation, both saved solar-view factors, optional
-Spencer taper, and sine-only legacy-x directional model. `2D_model` was not
-merged. The broad experimental evidence remains in
-`vault/03_Validation/2D Model Experiments - Summary.md`.
-
-The retained call is:
+The maintained background function is `backgroundmodel_BS()` with either the
+ordinary one-dimensional model or the selected directional model:
 
 ```python
-backgroundmodel_BS(images, spatial_model="legacy_x_azimuth", directional_x_knots=[-3.5, 0, 1.5, 3.5], spencer_taper=True)
+backgroundmodel_BS(
+    images,
+    spatial_model="legacy_x_azimuth",
+    directional_x_knots=[-3.5, 0, 1.5, 3.5],
+    spencer_taper=True,
+    noise_model="binned",
+    spatial_weighting="bin_population",
+    dgsigma_freeze_iteration=0,
+    input_variance="img_variance",
+    variance_weighted=True,
+    monotonic=True,
+    diagnostics=True
+)
 ```
 
-The next task is to repair the variance metadata and production runner, then
-examine the ordinary and directional BS models on 3--5 representative complete
-orbits. No complete orbit was processed during implementation.
+The model is `B0(x) + T(SZA)*S*Bs(x)`. It saves the base and directional
+components, both solar-view factors, and the Spencer taper. Monotonicity
+applies only to the base component.
 
-## BS-only cleanup
+SH and SBS implementations, accessors, exports, helpers, and examples are
+gone. The rejected compressed-nightside `asymmetric_legacy` path is also gone.
+The corrected image produced by active processing is `dgimg`.
 
-`backgroundmodel_SH()` and `backgroundmodel_SBS()` are removed from the source,
-public API, xarray accessor, utilities, and active examples. New processing
-ends at `backgroundmodel_BS()` and uses `dgimg`. Existing NetCDF files with SH
-variables can still be opened by xarray, but fuvpy no longer calculates them.
+## Repository layout after cleanup
 
-## Audit checkpoint
+The article-specific `examples/` content and tracked generated figures were
+removed because they describe an obsolete algorithm. The retained scripts are:
 
-The 2026-09-09 BS audit is recorded in `vault/03_Validation/BS Code Audit - 2026-09-09.md`. It verified the tensor-product design and monotonic transform, but confirmed three defects: returned fields exceed the actual fit-support mask, unrecognized keywords are silently ignored, and `_asymmetric_legacy_knots()` overwrites its calculated knots with a hard-coded list. On 2026-09-10 the user deferred the asymmetric-coordinate defect because that path remains experimental.
+- `scripts/compare_models.py` — compare the historical BS fields, revised
+  one-dimensional model, and selected directional model;
+- `scripts/extract_legacy_background.py` — rebuild the compact historical
+  comparison files from complete old orbit files; and
+- `scripts/validate_background_revision.py` — compare cumulative BS revisions
+  on complete native-grid orbits.
 
-The audit also established that the recent `sqrt(Tukey)` change is conventional IRLS but differs from the explicit `W**2` convention in Ohma et al. and the released implementation. Revised bin-population weighting and dimensionless damping likewise change the method. The validation script's `released` label is therefore not currently accurate.
-
-On 2026-09-10 the support mask and keyword handling were fixed. Historical `dzalim` and `minlat` keywords are retained only as warned compatibility arguments for the Ohma paper scripts. BS now scales damping from numerically supported positive `GTG` diagonal entries, and the empirical `dgsigma` calculation uses `Tukey * spatial_multiplier**2`. Measurement variance remains excluded from `dgsigma` intentionally.
-
-## Completed
-
-The released `backgroundmodel_BS` now has an explicit
-`noise_model="binned"` option. It retains the legacy dayglow coordinate and
-all other released fit behavior, but corrects the empirical `dgsigma`
-regression by fitting one point per populated geometry bin. The default
-`noise_model="legacy"` preserves the released result for comparison during
-combined validation.
-
-The bin edges define one fitted nightside bin below zero and 14 dayside bins
-from 0 to 3.5 in steps of 0.25. Within each populated bin the calculation
-forms the weighted means of `dgmodel**2` and `(img-dgmodel)**2`. A bounded
-linear fit constrains both slope and intercept to be nonnegative, and
-`dgsigma` is the square root of the fitted variance at every pixel.
-
-The BS fit also has an explicit `spatial_weighting="bin_population"` option.
-It bins the legacy coordinate at width 0.1 independently in each frame and
-assigns each fitted row a multiplier proportional to `1/sqrt(N_bin)`. The
-per-frame multipliers are normalized to mean square one over fitted pixels.
-The released inverse-Gaussian multiplier remains the default through
-`spatial_weighting="gaussian"`. The new option is explicitly rejected for VIS,
-which does not use the legacy FUV coordinate. The selected spatial multiplier
-continues to enter the `dgsigma` calculation through the same combined
-robust/spatial weight used by the released path.
-
-`dgsigma_freeze_iteration` now controls the last zero-based IRLS iteration
-that recalculates the operational scale. With zero, the scale is estimated
-after the initial fit and retained while subsequent model and Tukey-weight
-updates proceed. The default is one, preserving the released
-`iteration <= 1` sequence. The setting must be a nonnegative integer; no
-diagnostic history machinery was added.
-
-`read_idl(..., measurement_variance=True)` now reconstructs the original
-FUVVIEW3 calibration multiplier and adds `img_variance` for WIC, SI12, and
-SI13. SI uses `a*img + poisson_offset*a**2`; WIC uses the published reference
-compound-Poisson coefficient derived from `4*0.1*612.6/23`, approximately
-10.65 AD. The optional offset defaults to zero and is recorded in attributes.
-
-The loader accepts WIC calibration flags 1 and 3 under the documented
-assumption that `IMAGE` is the flag-1-equivalent corrected-AD field and flag 3
-labels the separate `CIMAGE` product. SI requires flag 1, all sensors require
-zero FUVVIEW3 airglow subtraction, and unsupported sensors or states raise.
-Variance is calculated before optional WIC reflattening and kept unchanged
-under the conditional deterministic-additive interpretation. Package data now
-include the original small mission and flat-field tables.
-
-WIC loading additionally supports
-`wic_variance_model="correction_aware"`. It uses `kappa_i=10.65*a_i`, where
-`a_i` is the reconstructed mission-gain times flat-field multiplier, in
-`variance=kappa_i*img + poisson_offset*kappa_i**2`. The constant 10.65
-coefficient remains the `"reference"` default. The selected model is stored
-on `img_variance`. This remains conditional on the multiplier being correct
-and does not add flat-field or gain uncertainty.
-
-The BS fit now has an explicit opt-in measurement weighting path:
-`input_variance` names the Dataset variance variable and
-`variance_weighted=True` applies `1/sqrt(variance)` to each fitted data row.
-The calculation visibly combines robust, spatial-sampling, and measurement
-row multipliers. Measurement variance is deliberately absent from both
-empirical dgsigma regressions and Tukey residual scaling. Fitted variance must
-be finite and strictly positive. The default remains unweighted.
-
-BS uses dimensionless zeroth-order damping:
-`R=dampingVal*scale*I`, where `scale` is the median supported positive diagonal
-of the initial weighted normal matrix. It remains fixed while IRLS updates the Tukey weights. A
-uniform change in row precision therefore does not alter relative damping,
-but historical numeric `dampingVal` settings do not transfer directly.
-
-The stored Tukey fields remain conventional objective weights. The fit uses
-their square roots as row multipliers, so the least-squares objective contains
-the Tukey weight once rather than squaring it again. Spatial and measurement
-terms remain direct row multipliers.
-
-The optional `asymmetric_legacy=True` coordinate starts from
-`x=cos(SZA)/cos(DZA)`, preserves `x>=0`, and maps negative values to
-`nightside_width*tanh(x/nightside_width)`. The width defaults to 0.2 and must
-be finite and positive. When knots are omitted, the negative anchors are
-`[-w, -0.75w, -0.25w]` and the remaining anchors stay
-`[0, 0.25, 1.5, 3.5]`; only tiny endpoint padding is added for strict support.
-Custom knots are respected. The released coordinate remains the default, and
-VIS rejects asymmetric mode. The transform uses the existing BS design,
-noise, spatial weighting, robust weighting, measurement weighting, and
-monotonic machinery without alternative paths.
-
-The optional monotonic BS fit uses a free first spatial coefficient plus
-nonnegative increments for every temporal basis component. This matches the
-existing spatial-outer, temporal-inner coefficient ordering and leaves the
-temporal B-spline unchanged. `monotonic_solver="normal"` first reduces the
-weighted image rows to the coefficient-sized normal system;
-`monotonic_solver="full"` is the full-row bounded reference. Both retain the
-same robust, spatial, and measurement row multipliers. The default remains the
-ordinary unconstrained solver. BVLS keeps `max_iter=1000`, and `result.success`
-is the criterion for accepting the bounded result.
-
-Monotonic failures raise `RuntimeError` by default. With the explicit
-`monotonic_fallback=True` option, failure instead emits a `RuntimeWarning` and
-the ordinary solver handles that IRLS iteration and all remaining iterations;
-the failed bounded solve is not retried. Every fit saves scalar
-`dgsolver_flag`: 0 standard requested, 1 monotonic succeeded throughout, and 2
-monotonic failed and standard fallback was used. This output does not depend
-on diagnostics.
-
-`examples/scripts/validate_background_revision.py` is a concise Step 7
-comparison tool. It requires explicit complete native-grid WIC, SI12, and SI13
-orbit NetCDF paths and runs the six cumulative variants from released through
-monotonic. Existing `img_variance` is preserved and checked on fitted pixels.
-Missing SI variance is attached with `poisson_offset=0.5`; missing WIC variance
-is rejected because the normally stored WIC image is already reflattened and
-cannot reproduce the loader's pre-reflattening calculation. A suitable WIC
-orbit must be loaded and saved with
-`read_idl(..., measurement_variance=True, poisson_offset=0.5)`.
-Stored validation variance must identify `poisson_offset=0.5`. WIC variance
-must also retain the loader attribute
-`calculated_from="img before optional WIC reflattening"`; otherwise the script
-rejects it rather than accepting variance with ambiguous provenance.
-
-The script writes representative figures showing `dgmodel`, `dgimg`,
-`dgsigma`, and `dgweight`, plus a CSV containing fit time, robust summary
-metrics, IRLS iteration count, convergence, and `dgsolver_flag`. Fallback is
-explicitly disabled in the monotonic validation variant so a bounded-solver
-failure remains visible. Iteration count and convergence are supplied by the
-minimal opt-in `backgroundmodel_BS(..., diagnostics=True)` fields
-`dgfit_iterations` and `dgfit_converged`; neither field is returned by default.
-No diagnostic histories were added. The script does not change package
-defaults.
+The IDL validation sequences and compact historical BS/SH comparison fields
+remain under `data/`. Each compact file contains `dgmodel`, `dgimg`,
+`dgweight`, `dgsigma`, `shmodel`, `shimg`, and `shweight`. Generated figures
+are ignored. The obsolete Binder environment,
+empty `.gitmodules`, unused 89 MB `image_orbit.h5`, and local build/test caches
+were removed.
 
 ## Verification
 
-The audit result supersedes older passing-test statements below where they
-conflict: after the 2026-09-10 repairs, the current complete suite has 79 passes and three failures. The BS
-failure is the hard-coded asymmetric-knot override; the other two concern
-missing measurement-variance metadata.
+`pytest -q` reports 88 passes and two failures. The failures predate this
+cleanup and both concern missing `img_variance` metadata:
 
-The revised Tukey and dimensionless-damping calculations pass 34 focused BS
-tests covering ordinary and monotonic solves, measurement and spatial weights,
-`dgsigma`, freeze behavior, and diagnostics. The new nonzero-damping test
-confirms invariance to a uniform measurement-precision scale. The current full
-suite has 100 passes and three known failures: two missing measurement-variance
-metadata fields and the experimental hard-coded asymmetric-knot override.
+- `excludes`; and
+- `reflattening_assumption`.
 
-`pytest -q tests/test_background_dgsigma.py
-tests/test_background_spatial_weighting.py
-tests/test_background_dgsigma_freeze.py
-tests/test_measurement_uncertainty.py
-tests/test_background_measurement_weighting.py
-tests/test_background_monotonic.py
-tests/test_background_revision_validation.py
-tests/test_background_diagnostics.py` passes 59 tests. In addition to Steps
-1--3, tests cover SI and WIC equations and offsets, representative mission and
-flat-field selection, dimensions, masks, metadata, rejected calibration
-states, pre-reflattening calculation, and unchanged default loader behavior.
-Step 5 tests confirm zero-damping equivalence for constant variance, reduced
-influence of a high-variance observation, separation from dgsigma estimation,
-and rejection of invalid fitted variance.
-Step 6 tests cover coefficient ordering, monotonic legacy-coordinate profiles,
-normal/full equivalence with combined row weights and damping, unchanged
-ordinary behavior, all three solver flags, strict solver failure, explicit
-warning/fallback behavior, and no repeated monotonic attempt after fallback.
-The script tests cover the exact cumulative variant sequence, representative
-frames, shared robust limits, stored WIC variance preservation, explicit WIC
-rejection when variance is absent, invalid, or lacks the required offset and
-pre-reflattening provenance, SI attachment, and required CLI arguments.
-Diagnostics tests cover default absence and opt-in scalar converged values.
-`python examples/scripts/validate_background_revision.py --help` also passes.
-No orbit model comparison was run.
+Imports, retained script paths, and the BS-only public API are otherwise
+intact. No active source, test, or script refers to SH, SBS, or
+`asymmetric_legacy`.
 
-The WIC variance option has four passing focused tests. A broader group of 36
-loader, BS measurement-weighting, and validation-script tests passes after
-deselecting two pre-existing metadata tests. Those tests fail because the
-current committed loader no longer writes `excludes` and
-`reflattening_assumption`; this was not changed as part of the WIC option. A
-real 2000-08-28 WIC file also loaded successfully with both models; the
-correction-aware/reference variance ratio had 5th, 50th, and 95th percentiles
-of 1.02, 1.12, and 1.51.
+## Downstream incompatibility
 
-Earlier SH compatibility and shrinkage findings remain available in the
-historical session and validation notes. They are no longer active development
-requirements because SH is not part of the selected architecture.
-
-`pytest -q tests/test_background_asymmetric_legacy.py
-tests/test_background_dgsigma.py tests/test_background_spatial_weighting.py
-tests/test_background_dgsigma_freeze.py
-tests/test_background_measurement_weighting.py
-tests/test_background_monotonic.py tests/test_background_diagnostics.py`
-passes 46 tests. Asymmetric tests cover the exact mapping, released-coordinate
-identity, default width and knot anchors, a custom width, invalid widths, VIS
-rejection, preserved custom knots, and a combined revised-option fit.
+icBuilder still calls `backgroundmodel_SH()` and expects `shimg` and
+`shweight`. It cannot use this fuvpy branch until its orbit runner and detector
+reader are changed to the BS-only fields.
 
 ## Next action
 
-Run the complete-orbit comparison and select dimensionless damping. Keep `sqrt(Tukey)` as the revised candidate and make comparison labels truthful; exact paper reproduction is not the development objective. Defer asymmetric-coordinate and residual-norm work.
+1. Restore the two required measurement-variance metadata fields.
+2. Update icBuilder to use the revised loader and BS-only background call.
+3. Add atomic saving and restart validation to the orbit runner.
+4. Run a 3--5-orbit complete pilot and select dimensionless BS damping.
 
-Mount the complete native-grid orbit data, generate and save the complete WIC
-orbit with pre-reflattening `img_variance`, then run the script with explicit
-paths, for example:
-
-```bash
-python examples/scripts/validate_background_revision.py \
-  --wic /path/to/complete_wic_orbit.nc \
-  --si12 /path/to/complete_si12_orbit.nc \
-  --si13 /path/to/complete_si13_orbit.nc \
-  --output-dir /tmp/fuvpy_background_revision_validation
-```
-
-Do not use the partial icBuilder example IDLs for scientific validation and do
-not change package defaults before the complete-orbit comparison is accepted.
-
-## Portfolio impact
-
-The clean background-model revision has completed Steps 1 through 6 and has a
-reusable combined-validation script plus one isolated asymmetric legacy
-coordinate option. Scientific validation remains pending
-because `/home/bing/dtu_server` is not mounted and the complete WIC input must
-include correctly generated pre-reflattening variance; package defaults and
-downstream production guidance are unchanged.
+The production-readiness audit is in
+`vault/03_Validation/Production Readiness Audit - 2026-09-12.md`.

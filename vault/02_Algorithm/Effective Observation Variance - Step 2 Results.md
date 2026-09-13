@@ -95,7 +95,8 @@ DZA, and mission time. No Step 3 calculation has been started.
 
 ## Reproduction
 
-- Script: `examples/scripts/effective_observation_variance.py`
+- Historical script removed during the 2026-09-12 repository cleanup:
+  `examples/scripts/effective_observation_variance.py`
 - Scratch output: `/tmp/fuvpy_go_no_go/step2/`
 - Main diagnostics: `effective_variance_models.png` and
   `detector_residual_correlation.png`

@@ -8,13 +8,15 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import xarray as xr
 
 import fuvpy as fuv
 
 
-REPOSITORY = Path(__file__).resolve().parents[2]
+REPOSITORY = Path(__file__).resolve().parents[1]
 EXAMPLE_DATA = REPOSITORY / "data"
-OUTPUT_DIRECTORY = REPOSITORY / "figures" / "bs_model_comparison"
+LEGACY_BACKGROUND = EXAMPLE_DATA / "legacy_background"
+OUTPUT_DIRECTORY = REPOSITORY / "figures" / "model_comparison"
 
 SENSOR_DIRECTORIES = {
     "WIC": "wic_data",
@@ -69,82 +71,93 @@ def plot_image(axis, values, title, cmap, limits):
     axis.set_axis_off()
 
 
-def plot_frame(original, m1, m2, m3, m4, m5, m6, frame, output_directory):
+def plot_frame(original, legacy, m2, m3, frame, output_directory):
     """Plot all model variants for one frame."""
-
+    
+    # Img, Variance, SZA, DZA
+    # x, cos, sine, spencer
+    # org
+    # new old
+    # new
+    # new : base + sine
+    
+    # x, cos, sine, spencer
+    
     original_image = original.img.isel(date=frame).values
-    sza = original.sza.isel(date=frame).values
-    coordinate = np.cos(np.deg2rad(original.sza.isel(date=frame))) / np.cos(np.deg2rad(original.dza.isel(date=frame)))
     variance = original.img_variance.isel(date=frame).values
+    sza = original.sza.isel(date=frame).values
+    dza = original.dza.isel(date=frame).values
+    
+    x = np.cos(np.deg2rad(original.sza.isel(date=frame))) / np.cos(np.deg2rad(original.dza.isel(date=frame)))
+    cos = m3.solar_view_cosine_factor.isel(date=frame).values
+    sin = m3.solar_view_sine_factor.isel(date=frame).values
+    spencer = m3.spencer_taper_factor.isel(date=frame).values
 
-    m1_model = m1.dgmodel.isel(date=frame).values
+    legacy_model = legacy.dgmodel.isel(date=frame).values
+    legacy_model_sh = legacy.shmodel.isel(date=frame).values
     m2_model = m2.dgmodel.isel(date=frame).values
     m3_model = m3.dgmodel.isel(date=frame).values
-    m4_model = m4.dgmodel.isel(date=frame).values
-    m5_model = m5.dgmodel.isel(date=frame).values
-    m6_model = m6.dgmodel.isel(date=frame).values
-    model_values = np.stack([m1_model, m2_model, m3_model, m4_model, m5_model, m6_model])
+    m3_model_base = m3.dgmodel_base.isel(date=frame).values
+    m3_model_sin = m3.dgmodel_sine.isel(date=frame).values    
+    model_values = np.stack([legacy_model, m2_model, m3_model, m3_model_base])
+    model_asym_values = np.stack([legacy_model_sh, m3_model_sin])
 
-    m1_corrected = m1.dgimg.isel(date=frame).values
+    legacy_corrected = legacy.dgimg.isel(date=frame).values
+    legacy_corrected_sh = legacy.shimg.isel(date=frame).values
     m2_corrected = m2.dgimg.isel(date=frame).values
     m3_corrected = m3.dgimg.isel(date=frame).values
-    m4_corrected = m4.dgimg.isel(date=frame).values
-    m5_corrected = m5.dgimg.isel(date=frame).values
-    m6_corrected = m6.dgimg.isel(date=frame).values
-    corrected_values = np.stack([m1_corrected, m2_corrected, m3_corrected, m4_corrected, m5_corrected, m6_corrected])
+    m3_corrected_base = m3.img.isel(date=frame).values - m3_model_base
+    m3_corrected_sin = m3.img.isel(date=frame).values - m3_model_sin
+    corrected_values = np.stack([legacy_corrected, m2_corrected, m3_corrected, m3_corrected_base, m3_corrected_sin, legacy_corrected_sh])
 
-    m1_weight = m1.dgweight.isel(date=frame).values
+    legacy_weight = legacy.dgweight.isel(date=frame).values
+    sh_weight = legacy.shweight.isel(date=frame).values
     m2_weight = m2.dgweight.isel(date=frame).values
     m3_weight = m3.dgweight.isel(date=frame).values
-    m4_weight = m4.dgweight.isel(date=frame).values
-    m5_weight = m5.dgweight.isel(date=frame).values
-    m6_weight = m6.dgweight.isel(date=frame).values
 
-    m1_uncertainty = m1.dgsigma.isel(date=frame).values
+    legacy_uncertainty = legacy.dgsigma.isel(date=frame).values
     m2_uncertainty = m2.dgsigma.isel(date=frame).values
     m3_uncertainty = m3.dgsigma.isel(date=frame).values
-    m4_uncertainty = m4.dgsigma.isel(date=frame).values
-    m5_uncertainty = m5.dgsigma.isel(date=frame).values
-    m6_uncertainty = m6.dgsigma.isel(date=frame).values
-    uncertainty_values = np.stack([m1_uncertainty, m2_uncertainty, m3_uncertainty, m4_uncertainty, m5_uncertainty, m6_uncertainty])
+    uncertainty_values = np.stack([legacy_uncertainty, m2_uncertainty, m3_uncertainty])
 
     image_limits = colour_limits(original_image)
     variance_limits = colour_limits(variance)
-    model_limits = colour_limits(model_values)
+    model_limits = colour_limits(model_values, symmetric=True)
+    asym_limits = colour_limits(model_asym_values, symmetric=True)
     corrected_limits = colour_limits(corrected_values, symmetric=True)
     uncertainty_limits = colour_limits(uncertainty_values, symmetric=True)
 
-    figure, axes = plt.subplots(7, 4, figsize=(10, 17), sharex=True, sharey=True)
+    figure, axes = plt.subplots(7, 4, figsize=(10, 17.5), sharex=True, sharey=True)
 
     panels = [
-        (original_image, "Original corrected image", "viridis", image_limits),
+        (original_image, "Original image", "viridis", image_limits),
         (variance, "Estimated input variance", "magma", variance_limits),
-        (sza, "SZA", "magma", (0, 150)),
-        (coordinate, "cos(SZA)/cos(DZA)", "seismic", (-2, 2)),
-        (m1_model, "BS model : Original", "viridis", model_limits),
-        (m1_corrected, "Corrected image", "seismic", corrected_limits),
-        (m1_weight, "Tukey weights", "viridis", (0, 1)),
-        (m1_uncertainty, "dgsigma", "seismic", uncertainty_limits),
-        (m2_model, "Original + dgsigma", "viridis", model_limits),
+        (sza, "SZA", "seismic", (0, 180)),
+        (dza, "DZA", "magma", (0, 75)),
+        (x, "cos(SZA)/cos(DZA)", "seismic", (-2, 2)),
+        (cos, "Cosine factor", "seismic", (-1, 1)),
+        (sin, "Sine factor", "seismic", (-1, 1)),
+        (spencer, "Spencer taper", "magma", (0, 1)),
+        (legacy_model, "Historical saved model", "seismic", model_limits),
+        (legacy_corrected, "Corrected image", "seismic", corrected_limits),
+        (legacy_weight, "Tukey weights", "viridis", (0, 1)),
+        (legacy_uncertainty, "dgsigma", "seismic", uncertainty_limits),
+        (legacy_model_sh, "Historical saved model (SH)", "seismic", asym_limits),
+        (legacy_corrected_sh, "", "seismic", corrected_limits),
+        (sh_weight, "", "viridis", (0, 1)),
+        (legacy_uncertainty, "dgsigma (shared)", "seismic", uncertainty_limits),
+        (m2_model, "Revised model", "seismic", model_limits),
         (m2_corrected, "", "seismic", corrected_limits),
         (m2_weight, "", "viridis", (0, 1)),
         (m2_uncertainty, "", "seismic", uncertainty_limits),
-        (m3_model, "Original + variance", "viridis", model_limits),
+        (m3_model, "Asymmetric model", "seismic", model_limits),
         (m3_corrected, "", "seismic", corrected_limits),
         (m3_weight, "", "viridis", (0, 1)),
         (m3_uncertainty, "", "seismic", uncertainty_limits),
-        (m4_model, "Original + mono", "viridis", model_limits),
-        (m4_corrected, "", "seismic", corrected_limits),
-        (m4_weight, "", "viridis", (0, 1)),
-        (m4_uncertainty, "", "seismic", uncertainty_limits),
-        (m5_model, "New", "viridis", model_limits),
-        (m5_corrected, "", "seismic", corrected_limits),
-        (m5_weight, "", "viridis", (0, 1)),
-        (m5_uncertainty, "", "seismic", uncertainty_limits),
-        (m6_model, "New : asymmetric", "viridis", model_limits),
-        (m6_corrected, "", "seismic", corrected_limits),
-        (m6_weight, "", "viridis", (0, 1)),
-        (m6_uncertainty, "", "seismic", uncertainty_limits),
+        (m3_model_base, "Base model", "seismic", model_limits),
+        (m3_corrected_base, "Base corrected", "seismic", corrected_limits),
+        (m3_model_sin, "Asymmetric model", "seismic", asym_limits),
+        (m3_corrected_sin, "Asymmetric correction", "seismic", corrected_limits)        
     ]
 
     for axis, panel in zip(axes.flat, panels):
@@ -172,13 +185,24 @@ def process_sensor(sensor, directory):
     # FUVVIEW3 WIC flat field for this comparison.
     reflat = sensor == "WIC"
     #images = fuv.read_idl([str(path) for path in files], dzalim=75, reflat=reflat, measurement_variance=True, poisson_offset=0.5, wic_variance_model="correction_aware")
-    images = fuv.read_idl([str(path) for path in files], dzalim=75, reflat=reflat, measurement_variance=True, poisson_offset=0.5, wic_variance_model='reference')
+    images = fuv.read_idl([str(path) for path in files], dzalim=75, reflat=reflat, measurement_variance=True, poisson_offset=0.5, wic_variance_model='reference', viewing_geometry=True)
+
+    legacy_file = LEGACY_BACKGROUND / f"{sensor.lower()}.nc"
+    if not legacy_file.exists():
+        raise FileNotFoundError(f"Missing {legacy_file}. Run extract_legacy_background.py first")
+    with xr.open_dataset(legacy_file) as saved:
+        legacy = saved.load()
 
     sequences = split_image_sequences(images)
     output_directory = OUTPUT_DIRECTORY / sensor.lower()
     output_directory.mkdir(parents=True, exist_ok=True)
 
     for sequence in sequences:
+        try:
+            legacy_sequence = legacy.sel(date=sequence.date)
+        except KeyError as error:
+            raise KeyError(f"Historical data do not contain every {sensor} frame in this sequence. Rerun extract_legacy_background.py") from error
+
         settings = dict(BS_SETTINGS)
         settings["n_tKnots"] = min(5, sequence.sizes["date"])
         settings["input_variance"] = "img_variance"
@@ -186,26 +210,14 @@ def process_sensor(sensor, directory):
         settings['spatial_weighting'] = "bin_population"
         settings['dgsigma_freeze_iteration'] = 0
 
-        # Original
-        m1 = fuv.backgroundmodel_BS(sequence, **settings)
-
-        # Original + corrected dgsigma
-        m2 = fuv.backgroundmodel_BS(sequence, noise_model="binned", **settings)
-
-        # Original + variance
-        m3 = fuv.backgroundmodel_BS(sequence, noise_model="binned", variance_weighted=True, **settings)
-
-        # Original + monotonic
-        m4 = fuv.backgroundmodel_BS(sequence, noise_model="binned", monotonic=True, **settings)
-
         # Combined revised model
-        m5 = fuv.backgroundmodel_BS(sequence, noise_model="binned", variance_weighted=True, monotonic=True, **settings)
-
-        # Combined revised model with compressed nightside coordinates
-        m6 = fuv.backgroundmodel_BS(sequence, noise_model="binned", variance_weighted=True, monotonic=True, asymmetric_legacy=True, **settings)
+        m2 = fuv.backgroundmodel_BS(sequence, noise_model="binned", variance_weighted=True, monotonic=True, **settings)
+        
+        # Asymmetric
+        m3 = fuv.backgroundmodel_BS(sequence, spatial_model="legacy_x_azimuth", directional_x_knots=[-3.5, 0, 1.5, 3.5], spencer_taper=True, noise_model="binned", variance_weighted=True, monotonic=True, **settings)
 
         for frame in range(sequence.sizes["date"]):
-            plot_frame(sequence, m1, m2, m3, m4, m5, m6, frame, output_directory)
+            plot_frame(sequence, legacy_sequence, m2, m3, frame, output_directory)
 
     print(f"{sensor}: wrote {len(files)} figures to {output_directory}")
 

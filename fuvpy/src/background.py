@@ -16,25 +16,6 @@ from scipy.optimize import curve_fit, lsq_linear
 from scipy.stats import binned_statistic
 from scipy.linalg import lstsq
 
-def _asymmetric_legacy_coordinate(legacy_coordinate, nightside_width):
-    """Compress only the negative side of the legacy dayglow coordinate."""
-
-    legacy_coordinate = np.asarray(legacy_coordinate)
-    return np.where(legacy_coordinate >= 0, legacy_coordinate, nightside_width*np.tanh(legacy_coordinate/nightside_width))
-
-
-def _asymmetric_legacy_knots(nightside_width):
-    """Return compressed-nightside knots with strict-support endpoint padding."""
-
-    knots = np.array([-nightside_width, -0.75*nightside_width, -0.25*nightside_width, 0, 0.25, 1.5, 3.5])
-    # The transformed horizon can reach -width and ordinary pixels can equal
-    # the upper anchor, while the existing fit mask uses strict inequalities.
-    padding = 1e-6*(knots[-1] - knots[0])
-    knots[0] -= padding
-    knots[-1] += padding
-    knots = [-0.200004, -0.1, 0.05, 0.25, 1.5, 3.500004]
-    return knots
-
 
 def _monotonic_bs_transform(n_scp, n_tcp):
     """Map free baselines and nonnegative increments to BS coefficients.
@@ -219,13 +200,6 @@ def backgroundmodel_BS(imgs,**kwargs):
         `bin_population` gives every populated 0.1-wide legacy-coordinate bin
         equal total squared influence, independently in each frame. Default
         is `gaussian`.
-    asymmetric_legacy : bool, optional
-        If True, retain nonnegative `cos(SZA)/cos(DZA)` values and compress
-        negative values as `nightside_width*tanh(x/nightside_width)`. Default
-        is False.
-    nightside_width : float, optional
-        Positive finite scale for the asymmetric legacy nightside. Default is
-        0.2.
     dgsigma_freeze_iteration : int, optional
         Last zero-based IRLS iteration on which `dgsigma` is recalculated.
         Zero retains the estimate from the initial fit. The default is 1,
@@ -284,8 +258,6 @@ def backgroundmodel_BS(imgs,**kwargs):
     spencer_taper = bool(kwargs.pop('spencer_taper')) if 'spencer_taper' in kwargs.keys() else False
     noise_model = kwargs.pop('noise_model') if 'noise_model' in kwargs.keys() else 'legacy'
     spatial_weighting = kwargs.pop('spatial_weighting') if 'spatial_weighting' in kwargs.keys() else 'gaussian'
-    asymmetric_legacy = bool(kwargs.pop('asymmetric_legacy')) if 'asymmetric_legacy' in kwargs.keys() else False
-    nightside_width = kwargs.pop('nightside_width') if 'nightside_width' in kwargs.keys() else 0.2
     dgsigma_freeze_iteration = kwargs.pop('dgsigma_freeze_iteration') if 'dgsigma_freeze_iteration' in kwargs.keys() else 1
     input_variance = kwargs.pop('input_variance') if 'input_variance' in kwargs.keys() else None
     variance_weighted = bool(kwargs.pop('variance_weighted')) if 'variance_weighted' in kwargs.keys() else False
@@ -322,13 +294,6 @@ def backgroundmodel_BS(imgs,**kwargs):
     if spencer_taper and not directional_model:
         raise ValueError("spencer_taper=True is only available for spatial_model='legacy_x_azimuth'")
 
-    try:
-        nightside_width = float(nightside_width)
-    except (TypeError, ValueError):
-        raise ValueError("nightside_width must be a finite number greater than zero") from None
-    if not np.isfinite(nightside_width) or nightside_width <= 0:
-        raise ValueError("nightside_width must be a finite number greater than zero")
-
     if (isinstance(dgsigma_freeze_iteration, (bool, np.bool_)) or not isinstance(dgsigma_freeze_iteration, (int, np.integer)) or dgsigma_freeze_iteration < 0):
         raise ValueError("dgsigma_freeze_iteration must be a non-negative integer")
 
@@ -344,15 +309,11 @@ def backgroundmodel_BS(imgs,**kwargs):
     if imgs['id'] in ['WIC','SI12','SI13','UVI']:
         sza = imgs['sza'].stack(z=('row','col')).values
         fraction = np.cos(np.deg2rad(sza))/np.cos(np.deg2rad(imgs['dza'].stack(z=('row','col')).values))
-        if asymmetric_legacy:
-            fraction = _asymmetric_legacy_coordinate(fraction, nightside_width)
         if sKnots is None:
-            sKnots = _asymmetric_legacy_knots(nightside_width) if asymmetric_legacy else [-3.5,-0.25,0,0.25,1.5,3.5]
+            sKnots = [-3.5,-0.25,0,0.25,1.5,3.5]
     elif imgs['id'] == 'VIS':
         if directional_model:
             raise ValueError("spatial_model='legacy_x_azimuth' requires IMAGE/FUV viewing geometry")
-        if asymmetric_legacy:
-            raise ValueError("asymmetric_legacy requires the legacy FUV coordinate and is not available for VIS")
         sza = imgs['sza'].stack(z=('row','col')).values
         fraction = np.cos(np.deg2rad(sza))
         if sKnots is None: sKnots= [-1,-0.1,0,0.1,0.4,1]

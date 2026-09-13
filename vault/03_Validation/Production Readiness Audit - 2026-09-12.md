@@ -6,8 +6,8 @@ Branch: `background_model_asymmetry`
 ## Conclusion
 
 Do not start the complete IMAGE reprocessing yet. No new numerical defect was
-confirmed in the selected directional BS path, and the full local suite has
-100 passing tests. The remaining blockers are integration, validation, and
+confirmed in the selected directional BS path, and the cleaned local suite has
+88 passing tests. The remaining blockers are integration, validation, and
 long-run safety.
 
 ## Blockers
@@ -43,9 +43,6 @@ long-run safety.
 
 ## Known non-blockers
 
-- The unused asymmetric-coordinate helper still overwrites its calculated
-  knots with a hard-coded list. It does not affect the selected
-  `legacy_x_azimuth` model, but keeps the suite from passing cleanly.
 - `monotonic=True` constrains the base component only. The combined base plus
   sine model is not globally monotonic. This is a known model choice, not a
   hidden implementation defect.
@@ -54,8 +51,8 @@ long-run safety.
 
 ## Verification
 
-- Full suite: 100 passed, 3 failed. The failures are the unused asymmetric
-  knot override and two missing measurement-variance metadata fields.
+- Current suite: 88 passed and two failed. Both failures concern missing
+  measurement-variance metadata.
 - Directional NetCDF round-trip coverage passes.
 - A focused scalar NetCDF check confirmed that the icBuilder compression
   dictionary can save and reload integer, boolean, and floating-point fields.

@@ -72,7 +72,8 @@ cycle; that is a separate decision rather than Step 4 of the present test.
 
 ## Reproduction
 
-- Script: `examples/scripts/validate_effective_observation_variance.py`
+- Historical script removed during the 2026-09-12 repository cleanup:
+  `examples/scripts/validate_effective_observation_variance.py`
 - Step 2 model: `/tmp/fuvpy_go_no_go/step2/variance_models.json`
 - Scratch output: `/tmp/fuvpy_go_no_go/step3/`
 - Diagnostics:

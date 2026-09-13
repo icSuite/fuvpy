@@ -1,8 +1,8 @@
 """Extract the historical background fields for the bundled IDL examples.
 
 The complete orbit files are too large for the repository. This script keeps
-only the dates represented by the example IDL files and the four fields used
-by compare_models.py.
+only the dates represented by the validation IDL files and the BS/SH fields
+used by compare_models.py.
 """
 
 from datetime import datetime
@@ -12,7 +12,7 @@ import numpy as np
 import xarray as xr
 
 
-REPOSITORY = Path(__file__).resolve().parents[2]
+REPOSITORY = Path(__file__).resolve().parents[1]
 SOURCE_DIRECTORY = Path.home() / "Downloads" / "data"
 OUTPUT_DIRECTORY = REPOSITORY / "data" / "legacy_background"
 
@@ -22,7 +22,7 @@ SENSORS = {
     "si13": ("s13", "s13_data")
 }
 
-FIELDS = ["dgmodel", "dgimg", "dgweight", "dgsigma"]
+FIELDS = ["dgmodel", "dgimg", "dgweight", "dgsigma", "shmodel", "shimg", "shweight"]
 
 
 def idl_minute(path):
@@ -59,7 +59,7 @@ def extract_sensor(sensor, source_prefix, idl_directory):
     found_minutes = result.date.values.astype("datetime64[m]")
     missing_minutes = np.setdiff1d(wanted_minutes, found_minutes)
 
-    result.attrs["description"] = "Historical fuvpy background results for the bundled IDL examples"
+    result.attrs["description"] = "Historical fuvpy background results for the bundled IDL validation files"
     result.attrs["source"] = str(SOURCE_DIRECTORY)
     result.attrs["selection"] = "Frames matched to example IDL filenames at one-minute precision"
 

@@ -21,7 +21,8 @@ The repository contains:
 - auroral-boundary models in `fuvpy/src/boundaries.py`;
 - xarray accessors and plotting helpers;
 - utilities for sunlight, coordinates, dates, and oval models; and
-- notebooks, scripts, figures, and a small WIC example sequence.
+- validation scripts, compact historical results, and three IDL validation
+  sequences.
 
 The background work is limited to `backgroundmodel_BS`, with or without its
 directional asymmetry. It does not calibrate the cameras or choose the
@@ -42,12 +43,10 @@ discrepancy unless those sources are added explicitly.
 
 `pyproject.toml` declares matplotlib, netCDF4, NumPy, pandas, SciPy, and xarray.
 The README also requires `polplot`, which is imported by the source but is not
-declared in `pyproject.toml`. The supplied environment is pinned to Python
-3.10-era scientific packages. No automated tests are present at the initial
-checkpoint.
+declared in `pyproject.toml`. Focused automated tests cover the revised
+background model, loading, measurement variance, and viewing geometry.
 
 ## External ownership
 
-The local repository tracks the public `aohma/fuvpy` upstream. The uncertainty
-branch is local and has not been pushed. Do not assume permission to publish
-changes upstream or change the remote.
+`origin` is `icSuite/fuvpy`; the original `aohma/fuvpy` repository is retained
+as `upstream`. The active branch is `background_model_asymmetry`.
