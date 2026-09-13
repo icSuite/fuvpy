@@ -62,8 +62,8 @@ def test_explicitly_disabling_monotonic_fit_matches_default():
         np.testing.assert_array_equal(explicit[field], ordinary[field])
     assert int(ordinary["dgsolver_flag"]) == 0
     assert int(explicit["dgsolver_flag"]) == 0
-    np.testing.assert_array_equal(ordinary["dgsolver_flag"].attrs["flag_values"], [0, 1, 2])
-    assert ordinary["dgsolver_flag"].attrs["flag_meanings"] == "standard_requested monotonic_succeeded monotonic_failed_standard_fallback"
+    np.testing.assert_array_equal(ordinary["dgsolver_flag"].attrs["flag_values"], [0, 1, 2, 3, 4])
+    assert ordinary["dgsolver_flag"].attrs["flag_meanings"] == "standard_requested monotonic_succeeded monotonic_failed_standard_fallback monotonic_failed_no_fallback monotonic_failed_standard_fallback_failed"
 
 
 def test_monotonic_failure_warns_and_falls_back_once(monkeypatch):
@@ -77,20 +77,49 @@ def test_monotonic_failure_warns_and_falls_back_once(monkeypatch):
     monkeypatch.setattr(background, "_solve_monotonic_bs", fail_once)
 
     with pytest.warns(RuntimeWarning, match="all remaining IRLS iterations"):
-        result = background.backgroundmodel_BS(_synthetic_wic(), monotonic=True, monotonic_fallback=True, stop=1e-5)
+        result = background.backgroundmodel_BS(_synthetic_wic(), monotonic=True, monotonic_fallback=True, diagnostics=True, stop=1e-5)
 
     assert calls == 1
     assert int(result["dgsolver_flag"]) == 2
+    assert result["dgmodel"].attrs["monotonic_constraint"] == "none"
+    assert bool(result["dgfit_converged"])
 
 
-def test_monotonic_failure_is_reraised_when_fallback_is_disabled(monkeypatch):
+def test_monotonic_failure_returns_flagged_nan_product_when_fallback_is_disabled(monkeypatch):
     def fail(*args, **kwargs):
         raise RuntimeError("forced monotonic failure")
 
     monkeypatch.setattr(background, "_solve_monotonic_bs", fail)
 
-    with pytest.raises(RuntimeError, match="forced monotonic failure"):
-        background.backgroundmodel_BS(_synthetic_wic(), monotonic=True, monotonic_fallback=False)
+    with pytest.warns(RuntimeWarning, match="all-NaN background product"):
+        result = background.backgroundmodel_BS(_synthetic_wic(), monotonic=True, monotonic_fallback=False)
+
+    assert int(result["dgsolver_flag"]) == 3
+    assert not bool(result["dgfit_converged"])
+    assert result["dgmodel"].attrs["monotonic_constraint"] == "not_available"
+    assert "forced monotonic failure" in result["dgsolver_flag"].attrs["solver_message"]
+    for field in ["dgmodel", "dgimg", "dgweight", "dgsigma"]:
+        assert np.all(np.isnan(result[field]))
+
+
+def test_failed_ordinary_fallback_returns_flagged_nan_product(monkeypatch):
+    def fail_monotonic(*args, **kwargs):
+        raise RuntimeError("forced monotonic failure")
+
+    def fail_fallback(*args, **kwargs):
+        raise np.linalg.LinAlgError("forced fallback failure")
+
+    monkeypatch.setattr(background, "_solve_monotonic_bs", fail_monotonic)
+    monkeypatch.setattr(background, "lstsq", fail_fallback)
+
+    with pytest.warns(RuntimeWarning) as warnings_record:
+        result = background.backgroundmodel_BS(_synthetic_wic(), monotonic=True, monotonic_fallback=True)
+
+    assert len(warnings_record) == 2
+    assert int(result["dgsolver_flag"]) == 4
+    assert not bool(result["dgfit_converged"])
+    assert np.all(np.isnan(result["dgmodel"]))
+    assert "forced fallback failure" in result["dgsolver_flag"].attrs["solver_message"]
 
 
 def test_monotonic_solver_failure_is_explicit(monkeypatch):

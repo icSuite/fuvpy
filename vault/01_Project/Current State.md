@@ -1,6 +1,6 @@
 # Current State
 
-Last reviewed: 2026-09-12
+Last reviewed: 2026-09-13
 Branch: `background_model_asymmetry`
 Status: BS-only implementation complete; production integration remains
 
@@ -83,17 +83,21 @@ The retained research support is:
 
 ## Verification
 
-The current suite reports 90 passes. `img_variance` now records what it was
+The current suite reports 91 passes. `img_variance` now records what it was
 calculated from, which uncertainty sources it excludes, and the deterministic
 WIC reflattening assumption. No active source, test, or script refers to SH,
 SBS, or `asymmetric_legacy`.
+
+Monotonic solver failures no longer terminate processing. A successful
+ordinary fallback is flagged separately from an all-NaN failed product, and
+the saved monotonic metadata describes the result actually returned.
 
 ## Production boundary
 
 Do not start complete IMAGE processing yet:
 
-1. Run 3--5 complete representative orbits, inspect convergence and scientific
-   fields, and select BS damping.
+1. Complete points 4--6 of
+   `vault/03_Validation/FUVPY Production Reprocessing Checklist.md`.
 2. Update icBuilder to call the revised loader and BS-only model and to use
    `dgimg`/`dgweight` instead of SH fields.
 3. Make the orbit runner interruption-safe with atomic saving and output

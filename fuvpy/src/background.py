@@ -221,12 +221,14 @@ def backgroundmodel_BS(imgs,**kwargs):
         system and is the operational default. `full` applies the same bounds
         to all weighted rows as a reference calculation.
     monotonic_fallback : bool, optional
-        If True, a failed monotonic solve emits a warning and uses the ordinary
-        solver for that IRLS iteration and all remaining iterations. Default
-        is False, so monotonic solver failures remain explicit.
+        If True, a failed monotonic solve uses the ordinary solver for that
+        IRLS iteration and all remaining iterations. If False, the function
+        returns an all-NaN background product with a failure flag. Neither
+        case terminates a long processing run. Default is False.
     diagnostics : bool, optional
         If True, add scalar `dgfit_iterations` and `dgfit_converged` fields.
-        Default is False.
+        Failed solver products include these fields even when diagnostics is
+        False. Default is False.
     inplace : bool, optional
         If True, update the Dataset in place. Default is False (return a new Dataset).
 
@@ -242,6 +244,8 @@ def backgroundmodel_BS(imgs,**kwargs):
             - imgs['dgnorm_residual'] is the residual norm
             - imgs['dgnorm_model'] is the model norm
             - imgs['dgsolver_flag'] is the scalar spatial-solver outcome code
+              (0 ordinary, 1 monotonic, 2 ordinary fallback, 3 failed without
+              fallback, or 4 failed ordinary fallback)
     '''
 
     # Set keyword arguments to input or default values    
@@ -437,6 +441,8 @@ def backgroundmodel_BS(imgs,**kwargs):
     R = None
     use_monotonic = monotonic
     solver_flag = 1 if monotonic else 0
+    solver_message = 'success'
+    fit_failed = False
     while (diff>stop)&(iteration < 100):
         # Keep robust, spatial-sampling, and measurement-precision roles
         # visible before forming the weighted least-squares system. Tukey
@@ -457,12 +463,26 @@ def backgroundmodel_BS(imgs,**kwargs):
                 m_s = _solve_monotonic_bs(weighted_design, weighted_data, R, n_scp, n_tcp, monotonic_solver, monotonic_transform, monotonic_lower)
             except RuntimeError as error:
                 if not monotonic_fallback:
-                    raise
+                    warnings.warn(f"Monotonic B-spline solve failed; returning an all-NaN background product: {error}", RuntimeWarning, stacklevel=2)
+                    solver_flag = 3
+                    solver_message = str(error)
+                    fit_failed = True
+                    break
                 warnings.warn(f"Monotonic B-spline solve failed; using the ordinary solver for this and all remaining IRLS iterations: {error}", RuntimeWarning, stacklevel=2)
                 use_monotonic = False
                 solver_flag = 2
+                solver_message = str(error)
         if not use_monotonic:
-            m_s = lstsq(GTG + R, GTd, lapack_driver='gelsy')[0]
+            try:
+                m_s = lstsq(GTG + R, GTd, lapack_driver='gelsy')[0]
+            except (np.linalg.LinAlgError, ValueError) as error:
+                if solver_flag != 2:
+                    raise
+                warnings.warn(f"Ordinary fallback solve also failed; returning an all-NaN background product: {error}", RuntimeWarning, stacklevel=2)
+                solver_flag = 4
+                solver_message = str(error)
+                fit_failed = True
+                break
         mNew    = M@m_s.reshape((n_scp, n_tcp)).T
         dm=[]
         for i, tt in enumerate(time):
@@ -488,25 +508,39 @@ def backgroundmodel_BS(imgs,**kwargs):
 
     if iteration == 100: print('Warning: Model did not converge. Truncated after 100 iterations')
 
-    normM = np.sqrt(np.average(m_s**2))
-    normR = np.sqrt(np.average(residuals**2,weights=w[ind]))
-
-    # Add dayglow model and corrected image to the Dataset
-    imgs['dgmodel'] = (['date','row','col'],(dm).reshape((n_t,len(imgs.row),len(imgs.col))))
-    imgs['dgimg'] = imgs[inImg]-imgs['dgmodel']
-    imgs['dgweight'] = (['date','row','col'],(w).reshape((n_t,len(imgs.row),len(imgs.col))))
-    imgs['dgsigma'] = (['date','row','col'],(sigma).reshape((n_t,len(imgs.row),len(imgs.col))))
-    imgs['dgnorm_residual'] = normR
-    imgs['dgnorm_model'] = normM
+    # A failed constrained fit must not leave a plausible-looking product.
+    # NaNs preserve the output schema while dgsolver_flag records why the fit
+    # is unavailable. The long-running caller can save the failure and move on.
+    if fit_failed:
+        shape = (n_t, len(imgs.row), len(imgs.col))
+        failed_field = np.full(shape, np.nan)
+        imgs['dgmodel'] = (['date','row','col'], failed_field.copy())
+        imgs['dgimg'] = (['date','row','col'], failed_field.copy())
+        imgs['dgweight'] = (['date','row','col'], failed_field.copy())
+        imgs['dgsigma'] = (['date','row','col'], failed_field.copy())
+        imgs['dgnorm_residual'] = np.nan
+        imgs['dgnorm_model'] = np.nan
+        if directional_model:
+            imgs['dgmodel_base'] = (['date','row','col'], failed_field.copy())
+            imgs['dgmodel_sine'] = (['date','row','col'], failed_field.copy())
+    else:
+        normM = np.sqrt(np.average(m_s**2))
+        normR = np.sqrt(np.average(residuals**2,weights=w[ind]))
+        imgs['dgmodel'] = (['date','row','col'],(dm).reshape((n_t,len(imgs.row),len(imgs.col))))
+        imgs['dgimg'] = imgs[inImg]-imgs['dgmodel']
+        imgs['dgweight'] = (['date','row','col'],(w).reshape((n_t,len(imgs.row),len(imgs.col))))
+        imgs['dgsigma'] = (['date','row','col'],(sigma).reshape((n_t,len(imgs.row),len(imgs.col))))
+        imgs['dgnorm_residual'] = normR
+        imgs['dgnorm_model'] = normM
+        if directional_model:
+            imgs['dgmodel_base'] = (['date','row','col'],dm_base.reshape((n_t,len(imgs.row),len(imgs.col))))
+            imgs['dgmodel_sine'] = (['date','row','col'],dm_sine.reshape((n_t,len(imgs.row),len(imgs.col))))
     imgs['dgsolver_flag'] = solver_flag
-    if directional_model:
-        imgs['dgmodel_base'] = (['date','row','col'],dm_base.reshape((n_t,len(imgs.row),len(imgs.col))))
-        imgs['dgmodel_sine'] = (['date','row','col'],dm_sine.reshape((n_t,len(imgs.row),len(imgs.col))))
-        if spencer_taper:
-            imgs['spencer_taper_factor'] = (['date','row','col'],directional_taper.reshape((n_t,len(imgs.row),len(imgs.col))))
-    if diagnostics:
+    if directional_model and spencer_taper:
+        imgs['spencer_taper_factor'] = (['date','row','col'],directional_taper.reshape((n_t,len(imgs.row),len(imgs.col))))
+    if diagnostics or fit_failed:
         imgs['dgfit_iterations'] = iteration
-        imgs['dgfit_converged'] = iteration < 100 and np.isfinite(diff) and diff <= stop
+        imgs['dgfit_converged'] = False if fit_failed else iteration < 100 and np.isfinite(diff) and diff <= stop
 
     # Do not return extrapolated models or fitting weights outside the pixels
     # that actually contributed to the inverse problem.
@@ -521,8 +555,10 @@ def backgroundmodel_BS(imgs,**kwargs):
 
     # Add attributes
     monotonic_constraint = 'none'
-    if monotonic:
+    if monotonic and solver_flag == 1:
         monotonic_constraint = 'legacy_base_nondecreasing' if directional_model else 'legacy_coordinate_nondecreasing'
+    elif solver_flag in [3, 4]:
+        monotonic_constraint = 'not_available'
     imgs['dgmodel'].attrs = {'long_name': 'BS model', 'spatial_model': spatial_model, 'monotonic_constraint': monotonic_constraint}
     imgs['dgimg'].attrs = {'long_name': 'BS corrected image'}
     imgs['dgweight'].attrs = {'long_name': 'BS model weights'}
@@ -531,8 +567,9 @@ def backgroundmodel_BS(imgs,**kwargs):
     imgs['dgnorm_model'].attrs = {'long_name': 'BS model solution norm'}
     imgs['dgsolver_flag'].attrs = {
         'long_name': 'BS spatial solver outcome',
-        'flag_values': np.array([0, 1, 2], dtype=np.int8),
-        'flag_meanings': 'standard_requested monotonic_succeeded monotonic_failed_standard_fallback'
+        'flag_values': np.array([0, 1, 2, 3, 4], dtype=np.int8),
+        'flag_meanings': 'standard_requested monotonic_succeeded monotonic_failed_standard_fallback monotonic_failed_no_fallback monotonic_failed_standard_fallback_failed',
+        'solver_message': solver_message
     }
     if directional_model:
         imgs['dgmodel'].attrs['directional_x_knots'] = directional_x_breaks
@@ -541,7 +578,7 @@ def backgroundmodel_BS(imgs,**kwargs):
         imgs['dgmodel_sine'].attrs = {'long_name': 'Sine-like solar-view directional background component'}
         if spencer_taper:
             imgs['spencer_taper_factor'].attrs = {'long_name': 'Normalized spherical-Chapman production factor', 'units': '1'}
-    if diagnostics:
+    if diagnostics or fit_failed:
         imgs['dgfit_iterations'].attrs = {'long_name': 'Number of BS IRLS iterations'}
         imgs['dgfit_converged'].attrs = {'long_name': 'BS IRLS convergence status'}
     # Return the new DataSet if not inplace 

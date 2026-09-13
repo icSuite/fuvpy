@@ -1,6 +1,6 @@
 # Production Readiness Audit
 
-Last reviewed: 2026-09-12
+Last reviewed: 2026-09-13
 Branch: `background_model_asymmetry`
 
 ## Conclusion
@@ -33,9 +33,9 @@ long-run safety.
 
 - Enable and inspect `dgfit_iterations`, `dgfit_converged`, and
   `dgsolver_flag` in production outputs.
-- Choose a monotonic-failure policy. If ordinary fallback is enabled, correct
-  the `monotonic_constraint` metadata when the saved result is no longer
-  monotonic.
+- The monotonic-failure policy is implemented. Ordinary fallback is optional;
+  all failure paths return explicit flags without terminating processing, and
+  `monotonic_constraint` reflects the saved result.
 - Record the actual BS configuration in each output file.
 
 ## Known non-blockers
@@ -48,7 +48,7 @@ long-run safety.
 
 ## Verification
 
-- Current suite: 90 passed.
+- Current suite: 91 passed.
 - Directional NetCDF round-trip coverage passes.
 - A focused scalar NetCDF check confirmed that the icBuilder compression
   dictionary can save and reload integer, boolean, and floating-point fields.
@@ -57,6 +57,7 @@ long-run safety.
 
 ## Next action
 
-Process 3--5 complete representative orbits through BS, save, and reload.
-Inspect convergence, solver flags, scientific fields, runtime, and memory;
-select BS damping before updating the downstream production runner.
+First make each BS result record its complete fit configuration. Then process
+3--5 complete representative orbits through BS, save, and reload. Inspect
+convergence, solver flags, scientific fields, runtime, and memory; select BS
+damping before updating the downstream production runner.

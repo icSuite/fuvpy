@@ -1,8 +1,8 @@
 # Handoff - Latest
 
-Last updated: 2026-09-12
+Last updated: 2026-09-13
 Branch: `background_model_asymmetry`
-Checkpoint: repository reduced to the BS-only background architecture
+Checkpoint: BS-only architecture complete; numbered production checklist established
 
 ## What is implemented
 
@@ -54,10 +54,16 @@ were removed.
 
 ## Verification
 
-`pytest -q` reports 90 passes. `img_variance` now records `calculated_from`,
+`pytest -q` reports 91 passes. `img_variance` now records `calculated_from`,
 `excludes`, and the WIC `reflattening_assumption`. The metadata fix does not
 change the variance values or background fit. No active source, test, or
 script refers to SH, SBS, or `asymmetric_legacy`.
+
+`monotonic_fallback` now controls whether an ordinary fit is attempted after
+a monotonic failure. Failed fits return flagged all-NaN products rather than
+terminating processing. Flags distinguish successful fallback, no fallback,
+and failed fallback, and the saved monotonic metadata reflects the returned
+fit.
 
 ## Downstream incompatibility
 
@@ -67,9 +73,14 @@ reader are changed to the BS-only fields.
 
 ## Next action
 
-1. Run a 3--5-orbit complete fuvpy pilot and select dimensionless BS damping.
-2. Update icBuilder to use the revised loader and BS-only background call.
-3. Add atomic saving and restart validation to the orbit runner.
+Use `vault/03_Validation/FUVPY Production Reprocessing Checklist.md` as the
+numbered source of truth. Points 1--3 are complete. Point 4, making each BS
+result self-describing, is next.
+
+After points 4--6 are complete:
+
+1. Update icBuilder to use the revised loader and BS-only background call.
+2. Add atomic saving and restart validation to the orbit runner.
 
 The production-readiness audit is in
 `vault/03_Validation/Production Readiness Audit - 2026-09-12.md`.
