@@ -230,8 +230,7 @@ def main():
     OUTPUT_DIRECTORY.mkdir(parents=True, exist_ok=True)
 
     orbits = [int(p.name[6:]) for p in sorted(Path(IDL_DATA).iterdir()) if p.is_dir()]
-    #for orbit in orbits:
-    for orbit in [968]:
+    for orbit in orbits:
         output_dir_orbit = OUTPUT_DIRECTORY / f"orbit_{orbit:04d}"
         output_dir_orbit.mkdir(parents=True, exist_ok=True)
         for sensor, directory in SENSOR_DIRECTORIES.items():
