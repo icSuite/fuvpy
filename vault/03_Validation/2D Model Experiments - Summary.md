@@ -1,115 +1,78 @@
 # 2D Model Experiments - Summary
 
-Last reviewed: 2026-09-11
-Experimental branch: `2D_model`
-Experimental checkpoint: `1556ff1`
+Last reviewed: 2026-09-18
+Source branch: `2D_model` at `1556ff1`
+Status: durable findings transferred; branch is an experimental archive
 
-## Why the experiments were run
+## Question
 
-The legacy coordinate `cos(SZA)/cos(DZA)` collapses illumination and viewing
-geometry to one number. It cannot distinguish geometrically different pixels
-with the same collapsed coordinate and therefore has limited ability to fit
-dawn-dusk background asymmetry. The experimental branch tested whether a
-direction-aware background model could improve this without fitting aurora.
-
-## Broad findings
-
-### Viewing geometry
-
-- SZA and unsigned DZA alone cannot distinguish opposite horizontal viewing
-  directions.
-- Assigning a sign directly to DZA introduced discontinuities when the
-  eastward line-of-sight component changed sign.
-- An eastward projected angle removed that seam but depended on the local
-  east direction and became unsuitable near the geographic pole.
-- Pole-safe solar-view dot and oriented-cross-product factors retained the
-  relative solar/viewing direction without choosing geographic east at the
-  pole.
-- Reconstructed DZA agreed with stored FUVVIEW3 DZA to about `1.5e-5` degrees
-  on bundled WIC, SI12, and SI13 frames. This validates the geometry
-  reconstruction, not the scientific background model.
-
-### Background surfaces
-
-- A free two-dimensional SZA-DZA surface could alter broad asymmetry, but it
-  introduced many coefficients and did not distinguish dawn from dusk.
-- Adding independent cosine and sine SZA-DZA surfaces supplied that direction
-  but was too flexible. Components could trade against one another, absorb
-  auroral structure, and produce ringing.
-- Constraining only the base surface to be monotonic did not make the combined
-  directional model monotonic.
-- The cosine component was repeatedly associated with unwanted structure,
-  particularly toward the nightside. Removing it was more promising.
-- Nonlinear two-dimensional models using the sine factor as a spline
-  coordinate produced poor corrected images or unstable weights in the
-  inspected examples.
-- A single scalar asymmetry was tested as a strongly constrained alternative,
-  but it was not selected over the x-dependent directional profile.
-
-### Coordinates and tapering
-
-Several alternative illumination coordinates and knot layouts were tried.
-None consistently improved the corrected images enough to replace the legacy
-coordinate. The useful change was instead to retain the legacy base and add a
-limited signed directional correction.
-
-Hard or raised-cosine suppression near the terminator could create edge
-effects. The normalized Spencer spherical-Chapman profile provided a smooth,
-physically motivated taper. It was useful for suppressing directional freedom
-on the nightside, but its inclusion should remain optional so its impact can
-be tested directly.
-
-## Leading candidate
-
-Visual comparison favored
-
-```text
-B = B0(x) + Tspencer(SZA) S Bs(x)
-```
-
-with
+The legacy coordinate
 
 ```text
 x = cos(SZA)/cos(DZA)
-directional_x_knots = [-3.5, 0, 1.5, 3.5]
 ```
 
-This was exposed experimentally as
-`spatial_model="legacy_x_azimuth"`, `include_cosine=False`, and
-`spencer_taper=True`. It retains the successful one-dimensional base, adds
-only one signed directional spline, and avoids a free SZA-DZA surface.
+cannot distinguish viewing directions with the same SZA and DZA. The branch
+tested whether retaining more viewing geometry could represent dawn-dusk
+background asymmetry without fitting aurora.
 
-The cosine factor remains scientifically useful as a visualization and
-geometry diagnostic even though it is not part of the retained fit.
+## Models tested
 
-## Evidence level
+The experiments covered:
 
-The branch accumulated focused geometry, synthetic-recovery, solver, taper,
-and compatibility tests. At the final checkpoint, 55 focused tests covering
-the wider model collection passed. Exact synthetic recovery showed that the
-retained formulation and taper were assembled as intended.
+- free two-dimensional SZA-DZA spline surfaces;
+- signed DZA and eastward viewing-angle coordinates;
+- pole-safe solar-view cosine and sine factors;
+- separate base, cosine, and sine spline surfaces;
+- alternative illumination coordinates, monotonic constraints, staged robust
+  fitting, and several terminator tapers; and
+- reduced directional models using SZA, the legacy coordinate, or a single
+  scalar asymmetry coefficient.
 
-Most scientific judgments came from visual inspection of bundled or selected
-frames. Representative complete-orbit validation was not run. Consequently:
+## Durable findings
 
-- the directional model is a leading candidate, not a validated default;
-- the proposed knot locations are provisional;
-- improved appearance does not establish that aurora is excluded from the
-  fitted directional component; and
-- the test count demonstrates implementation consistency, not physical
-  validity.
+- Reconstructed DZA matched the stored FUVVIEW3 DZA to about `1.5e-5` degrees
+  on the tested WIC, SI12, and SI13 frames. The viewing-geometry reconstruction
+  itself is therefore sound.
+- Unsigned DZA cannot distinguish dawn from dusk. Directly signing DZA creates
+  a seam, while an eastward-angle coordinate becomes ill-defined at the pole.
+- Pole-safe solar-view dot and oriented-cross-product factors preserve the
+  relative solar/viewing direction without an angular wrap or polar
+  singularity. Both remain useful diagnostic fields.
+- Free two-dimensional and multi-component surfaces were too flexible. Their
+  components traded against one another, absorbed auroral structure, and
+  produced ringing or unstable robust weights.
+- Constraining only a base component did not make the combined directional
+  background monotonic. The cosine component was particularly prone to
+  unwanted structure and brought no consistent visual benefit.
+- Alternative illumination coordinates, nightside compression, and more
+  elaborate sine-coordinate surfaces did not consistently improve corrected
+  images enough to replace the legacy base coordinate.
+- Smoothly suppressing directional freedom toward the nightside was useful.
+  The normalized Spencer spherical-Chapman profile was the most defensible
+  taper tested, although it remains optional.
 
-## What carries forward
+## Retained formulation
 
-The clean branch should carry forward only:
+The strongest candidate was the low-freedom sine-only model
 
-- the validated viewing-geometry reconstruction;
-- both solar-view geometry factors;
-- the optional Spencer taper;
-- the sine-only legacy-x directional model;
-- separate base and directional outputs; and
-- focused tests for those pieces.
+```text
+B = B0(x) + Tspencer(SZA) S Bs(x),
+x = cos(SZA)/cos(DZA),
+directional_x_knots = [-3.5, 0, 1.5, 3.5].
+```
 
-All other model variants remain available in `2D_model` as experimental
-history and should not be merged into the revised background model.
+It keeps the established one-dimensional base, adds one signed directional
+profile, and avoids a free SZA-DZA surface. This formulation, the optional
+Spencer taper, and both solar-view diagnostic factors were reimplemented
+cleanly on `background_model_asymmetry`; the larger model zoo was not carried
+forward.
 
+## Evidence boundary
+
+The branch included geometry checks and focused synthetic tests, but model
+selection was driven mainly by visual inspection of selected frames rather
+than representative complete-orbit validation. The experiments identify a
+promising constrained formulation, not proof of physical correctness or final
+knot tuning. Reopen the discarded 2D variants only if new validation evidence
+shows a specific limitation of the retained model.

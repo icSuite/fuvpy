@@ -20,7 +20,20 @@ from fuvpy.src.measurement_uncertainty import calibration_multiplier, si_measure
 from fuvpy.src.viewing_geometry import calculate_viewing_geometry
 from fuvpy.utils.sunlight import subsol
 
-def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True, measurement_variance=False, poisson_offset=0.0, wic_variance_model='reference', viewing_geometry=False):
+
+DEFAULT_FRAME_QUALITY_THRESHOLDS = {
+    'minimum_mapped_fraction': 0.0,
+    'minimum_relative_spread': 0.1,
+    'minimum_median_row_relative_spread': 0.06,
+    'minimum_science_mlat': 68.0,
+    'minimum_hv_mcp': 1000.0,
+    'minimum_wic_hv_phos': 1000.0,
+    'minimum_turn_on_mapped_fraction': 0.10,
+    'maximum_turn_on_correlation': 0.90
+}
+
+
+def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True, measurement_variance=False, poisson_offset=0.0, wic_variance_model='reference', viewing_geometry=False, frame_quality_thresholds=None):
     '''
     Load FUV images into a xarray.Dataset
 
@@ -56,6 +69,15 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
         If True, reconstruct and store the pole-safe solar-view cosine and
         sine factors. The reconstructed DZA is checked against the DZA stored
         by FUVVIEW3. Default is False.
+    frame_quality_thresholds : dict, optional
+        Overrides for ``minimum_mapped_fraction``,
+        ``minimum_relative_spread``,
+        ``minimum_median_row_relative_spread``, ``minimum_science_mlat``,
+        detector high-voltage thresholds, and the maximum correlation allowed
+        with a detector-off frame after turn-on. A turn-on correlation requires
+        at least ``minimum_turn_on_mapped_fraction`` common mapped pixels.
+        Quality 0 marks rejected frames, quality 1 marks detector-valid frames,
+        and quality 2 marks science-ready frames.
 
     Returns
     -------
@@ -74,7 +96,15 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
     'sza': Solar zenith angle of each pixel
     'hemisphere': Hemisphere of the image
     'id': Short name of the detector
+    'hv_phos': Phosphor high voltage stored by FUVVIEW3
+    'hv_mcp': Microchannel-plate high voltage stored by FUVVIEW3
     'bad': Bool of problematic pixels. True=good and False=bad
+    'frame_quality': Ordinal frame classification: 0 rejected, 1 usable, and
+                     2 science-ready
+    'row_relative_spread': Relative signal spread within each detector row
+    'median_row_relative_spread': Median relative spread across mapped rows
+    'turn_on_reference_correlation': Image correlation with the preceding
+                                     detector-off frame during turn-on
     When ``measurement_variance=True``:
     'img_variance': Conditional detector variance in img units squared
     'calibration_multiplier': FUVVIEW3 mission correction times flat field
@@ -110,6 +140,8 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
         })
         image_time = pd.to_datetime(_timestamp_idl(imageinfo['time'][0]))
         img = img.expand_dims(date=[image_time])
+        img['hv_phos'] = (['date'], [float(imageinfo['hv_phos'][0])])
+        img['hv_mcp'] = (['date'], [float(imageinfo['hv_mcp'][0])])
 
         coordinates = ['mlat','mlon','mlt','glat','glon','sza','dza']
         fillvals = [-1e+31,-1e+31,-1e+31,-1e+31,-1e+31,-1,-1]
@@ -171,6 +203,7 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
 
     imgs = xr.concat(imgs, dim='date')
     imgs = imgs.assign({'id':  imageinfo['inst_id'][0].strip().decode('utf8')})
+    imgs = _add_frame_quality(imgs, frame_quality_thresholds)
 
     # Use the calibrated detector image before optional WIC reflattening.
     # Reflattening is treated as a deterministic additive adjustment, so this
@@ -191,6 +224,8 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
     imgs['glon'].attrs = {'long_name': 'Geographic longitude', 'units': 'deg'}
     imgs['sza'].attrs = {'long_name': 'Solar zenith angle', 'units': 'deg'}
     imgs['dza'].attrs = {'long_name': 'Viewing angle', 'units': 'deg'}
+    imgs['hv_phos'].attrs = {'long_name': 'FUVVIEW3 phosphor high voltage', 'units': 'V'}
+    imgs['hv_mcp'].attrs = {'long_name': 'FUVVIEW3 microchannel-plate high voltage', 'units': 'V'}
     if viewing_geometry:
         imgs['solar_view_cosine_factor'].attrs = {'long_name': 'Cosine-like solar-viewing azimuth factor', 'units': '1', 'definition': 'horizontal_solar dot horizontal_viewing'}
         imgs['solar_view_sine_factor'].attrs = {'long_name': 'Sine-like solar-viewing azimuth factor', 'units': '1', 'definition': 'local_up dot (horizontal_solar cross horizontal_viewing)'}
@@ -261,6 +296,168 @@ def _add_measurement_variance(imgs, calibration_flags, airglow_scales, poisson_o
         imgs['img_variance'].attrs['reflattening_assumption'] = 'WIC reflattening is treated as a deterministic additive adjustment; img_variance is retained unchanged'
 
     return imgs
+
+
+def _add_frame_quality(imgs, thresholds=None):
+    """Classify frames from detector state, mapping, signal, and MLAT reach."""
+
+    settings = dict(DEFAULT_FRAME_QUALITY_THRESHOLDS)
+    if thresholds is not None:
+        if not isinstance(thresholds, dict):
+            raise TypeError("frame_quality_thresholds must be a dictionary or None")
+        unknown = set(thresholds)-set(settings)
+        if unknown:
+            raise ValueError(f"Unknown frame-quality threshold(s): {', '.join(sorted(unknown))}")
+        settings.update(thresholds)
+
+    for name, value in settings.items():
+        if isinstance(value, (bool, np.bool_)) or not np.isscalar(value) or not np.isfinite(value):
+            raise ValueError(f"{name} must be a finite number")
+    if not 0 <= settings['minimum_mapped_fraction'] <= 1:
+        raise ValueError("minimum_mapped_fraction must lie between 0 and 1")
+    if settings['minimum_relative_spread'] < 0 or settings['minimum_median_row_relative_spread'] < 0:
+        raise ValueError("relative-spread thresholds must be non-negative")
+    if not 0 <= settings['minimum_science_mlat'] <= 90:
+        raise ValueError("minimum_science_mlat must lie between 0 and 90 degrees")
+    if settings['minimum_hv_mcp'] < 0 or settings['minimum_wic_hv_phos'] < 0:
+        raise ValueError("detector high-voltage thresholds must be non-negative")
+    if not 0 <= settings['minimum_turn_on_mapped_fraction'] <= 1:
+        raise ValueError("minimum_turn_on_mapped_fraction must lie between 0 and 1")
+    if not 0 <= settings['maximum_turn_on_correlation'] <= 1:
+        raise ValueError("maximum_turn_on_correlation must lie between 0 and 1")
+
+    sensor = str(imgs['id'].values)
+    image = imgs['img'].transpose('date', 'row', 'col').values
+    detector_operational = np.isfinite(imgs['hv_mcp'].values) & (imgs['hv_mcp'].values >= settings['minimum_hv_mcp'])
+    if sensor == 'WIC':
+        detector_operational &= np.isfinite(imgs['hv_phos'].values) & (imgs['hv_phos'].values >= settings['minimum_wic_hv_phos'])
+
+    mlat = imgs['mlat'].transpose('date', 'row', 'col').values
+    sza = imgs['sza'].transpose('date', 'row', 'col').values
+    dza = imgs['dza'].transpose('date', 'row', 'col').values
+    mapped_pixels = np.isfinite(image) & np.isfinite(mlat) & np.isfinite(sza) & np.isfinite(dza)
+    quality = np.zeros(imgs.sizes['date'], dtype=np.int8)
+    row_relative_spread = np.full((imgs.sizes['date'], imgs.sizes['row']), np.nan)
+    median_row_relative_spread = np.full(imgs.sizes['date'], np.nan)
+
+    for frame in range(imgs.sizes['date']):
+        mapped = mapped_pixels[frame]
+        mapped_fraction = np.mean(mapped)
+        if not np.any(mapped) or mapped_fraction < settings['minimum_mapped_fraction']:
+            continue
+
+        for row in range(imgs.sizes['row']):
+            row_values = image[frame, row, mapped[row]]
+            if row_values.size < 8:
+                continue
+
+            row_mean = np.abs(np.mean(row_values))
+            row_spread = np.std(row_values)
+            row_relative_spread[frame, row] = row_spread/row_mean if row_mean > np.finfo(float).eps else (0 if row_spread == 0 else np.inf)
+
+        finite_rows = np.isfinite(row_relative_spread[frame])
+        if not np.any(finite_rows):
+            continue
+
+        median_row_relative_spread[frame] = np.median(row_relative_spread[frame, finite_rows])
+
+        if not detector_operational[frame]:
+            continue
+
+        values = image[frame][mapped]
+        mean = np.abs(np.mean(values))
+        spread = np.std(values)
+        relative_spread = spread/mean if mean > np.finfo(float).eps else (0 if spread == 0 else np.inf)
+        if not np.isfinite(relative_spread) or relative_spread < settings['minimum_relative_spread']:
+            continue
+
+        if median_row_relative_spread[frame] < settings['minimum_median_row_relative_spread']:
+            continue
+
+        quality[frame] = 1
+        if np.max(np.abs(mlat[frame][mapped])) >= settings['minimum_science_mlat']:
+            quality[frame] = 2
+
+    # After a recorded detector off-to-on transition, reject operational frames
+    # that still reproduce the detector-off pattern. Other quality failures do
+    # not start a correlation chain.
+    turn_on_reference_correlation = np.full(imgs.sizes['date'], np.nan)
+    turn_on_frames = np.flatnonzero(detector_operational[1:] & ~detector_operational[:-1]) + 1
+    for start in turn_on_frames:
+        reference = start - 1
+        if np.mean(mapped_pixels[reference]) < settings['minimum_turn_on_mapped_fraction']:
+            continue
+
+        for frame in range(start, imgs.sizes['date']):
+            if not detector_operational[frame]:
+                break
+
+            common_mapping = mapped_pixels[reference] & mapped_pixels[frame]
+            if np.mean(common_mapping) < settings['minimum_turn_on_mapped_fraction']:
+                break
+
+            correlation = _image_correlation(image[reference], image[frame], common_mapping)
+            turn_on_reference_correlation[frame] = correlation
+            if not np.isfinite(correlation) or correlation <= settings['maximum_turn_on_correlation']:
+                break
+
+            quality[frame] = 0
+
+    imgs['frame_quality'] = (['date'], quality)
+    imgs['row_relative_spread'] = (['date', 'row'], row_relative_spread)
+    imgs['median_row_relative_spread'] = (['date'], median_row_relative_spread)
+    imgs['turn_on_reference_correlation'] = (['date'], turn_on_reference_correlation)
+    imgs['row_relative_spread'].attrs = {
+        'long_name': 'Relative signal spread within each mapped detector row',
+        'definition': 'standard deviation divided by absolute mean',
+        'minimum_pixels': 8
+    }
+    imgs['median_row_relative_spread'].attrs = {
+        'long_name': 'Median relative signal spread across mapped detector rows',
+        'minimum_required': float(settings['minimum_median_row_relative_spread'])
+    }
+    imgs['turn_on_reference_correlation'].attrs = {
+        'long_name': 'Correlation with the preceding detector-off frame during turn-on',
+        'maximum_allowed': float(settings['maximum_turn_on_correlation']),
+        'minimum_common_mapped_fraction': float(settings['minimum_turn_on_mapped_fraction']),
+        'pixels': 'finite pixels mapped in both frames',
+        'rejection_rule': 'after detector turn-on, reject frames while correlation exceeds threshold'
+    }
+    imgs['frame_quality'].attrs = {
+        'long_name': 'Frame usability classification',
+        'flag_values': np.array([0, 1, 2], dtype=np.int8),
+        'flag_meanings': 'rejected usable science_ready',
+        'minimum_mapped_fraction': float(settings['minimum_mapped_fraction']),
+        'minimum_relative_spread': float(settings['minimum_relative_spread']),
+        'minimum_median_row_relative_spread': float(settings['minimum_median_row_relative_spread']),
+        'minimum_science_mlat': float(settings['minimum_science_mlat']),
+        'minimum_hv_mcp': float(settings['minimum_hv_mcp']),
+        'minimum_wic_hv_phos': float(settings['minimum_wic_hv_phos']),
+        'minimum_turn_on_mapped_fraction': float(settings['minimum_turn_on_mapped_fraction']),
+        'maximum_turn_on_correlation': float(settings['maximum_turn_on_correlation']),
+        'detector_state_requirement': 'WIC requires HV_PHOS and HV_MCP; other sensors require HV_MCP',
+        'science_mlat_definition': 'maximum absolute mapped magnetic latitude',
+        'turn_on_rule': 'compare operational frames with the preceding detector-off frame after an observed off-to-on transition'
+    }
+    return imgs
+
+
+def _image_correlation(reference, image, mask=None):
+    """Pearson correlation between finite pixels in two detector images."""
+
+    valid = np.isfinite(reference) & np.isfinite(image)
+    if mask is not None:
+        valid &= mask
+    if np.count_nonzero(valid) < 2:
+        return np.nan
+
+    reference_values = reference[valid] - np.mean(reference[valid])
+    image_values = image[valid] - np.mean(image[valid])
+    denominator = np.sqrt(np.sum(reference_values**2)*np.sum(image_values**2))
+    if denominator <= np.finfo(float).eps:
+        return np.nan
+
+    return np.sum(reference_values*image_values)/denominator
 
 def _timestamp_idl(timestamp):
     """ returns datetime object for timestamp = imageinfo['TIME'][0] """
@@ -344,6 +541,8 @@ def _reflatWIC(wic,inImg='img',outImg='img'):
     -------
     imgs : xarray.Dataset
         Copy(?) of the FUV dataset with a new field containing the reflattened images.
+        The scalar background is estimated only from frames with
+        ``frame_quality >= 1`` and the correction is applied to every frame.
     '''
     basepath = os.path.dirname(__file__)
     flatfields = readsav(basepath+'/../utils/wic_flatfield_dbase.idl')['flatfields']
@@ -352,7 +551,10 @@ def _reflatWIC(wic,inImg='img',outImg='img'):
     else:
         flat = flatfields[:,1]
 
-    background=np.nanmedian((wic[inImg]/flat[None,:,None]).values[wic['sza'].values>100|(np.isnan(wic['sza'].values)&(wic['img'].values>0))])
+    usable_frames = wic['frame_quality'].values >= 1
+    background_pixels = (wic['sza'].values > 100) | (np.isnan(wic['sza'].values) & (wic['img'].values > 0))
+    background_pixels &= usable_frames[:, None, None]
+    background=np.nanmedian((wic[inImg]/flat[None,:,None]).values[background_pixels])
     if np.isnan(background): background=450 # Set a reasonable value if no background pixels are available
     wic[outImg]=((wic[inImg].copy()/flat[None,:,None]-background)*flat[None,:,None]+background)
     return wic

@@ -37,8 +37,7 @@ optional fuvpy reflattening and retained under the assumption that the
 estimated additive reflattening background is deterministic.
 
 The variance can be used explicitly in the BS inversion with
-``backgroundmodel_BS(..., input_variance="img_variance",
-variance_weighted=True)``. This multiplies data-fit rows by
+``backgroundmodel_BS(..., variance_weighted=True)``. This multiplies data-fit rows by
 ``1/sqrt(img_variance)``. It does not replace the empirical ``dgsigma`` used
 for Tukey robust weighting. ``dampingVal`` is dimensionless: BS scales the
 identity regularization by the median supported positive diagonal of
@@ -54,25 +53,37 @@ directional correction to the ordinary background model. Load IDL files with
 ``spencer_taper=True`` limits the directional term using the Spencer
 spherical-Chapman profile. The returned dataset stores ``dgmodel_base`` and
 ``dgmodel_sine`` separately while ``dgmodel`` and ``dgimg`` contain the
-combined result.
+combined result. The current production candidate is::
+
+    result = backgroundmodel_BS(
+        images,
+        spatial_model="legacy_x_azimuth",
+        directional_x_knots=[-3.5, 0, 1.5, 3.5],
+        temporal_knot_spacing=120,
+        directional_temporal_knot_spacing=60,
+        spencer_taper=True,
+        variance_weighted=True,
+        monotonic=True,
+        monotonic_fallback=True,
+        dampingVal=1e-2
+    )
 
 ``backgroundmodel_BS(..., monotonic=True)`` optionally constrains each
 temporal component's spatial B-spline coefficients to be non-decreasing with
 the existing ``cos(SZA)/cos(DZA)`` coordinate. The default ``monotonic=False``
-keeps the released solver. ``monotonic_solver="normal"`` is the low-cost
-operational solver; ``"full"`` retains all weighted image rows as a reference
-calculation. A bounded solve is accepted only when SciPy reports
-``result.success``; ``max_iter`` remains fixed at 1000. By default a failure
-raises. ``monotonic_fallback=True`` instead warns and uses the ordinary solver
-for the failed IRLS iteration and all later iterations.
+uses the ordinary unconstrained solver. A bounded solve is accepted only when
+SciPy reports ``result.success``; ``max_iter`` remains fixed at 1000. With
+``monotonic_fallback=False``, failure returns a flagged all-NaN product without
+terminating a long processing run. ``monotonic_fallback=True`` instead warns
+and uses the ordinary solver for the failed IRLS iteration and all later
+iterations.
 
 Every BS result includes scalar ``dgsolver_flag``: 0 means the standard solver
-was requested, 1 means monotonic solving succeeded throughout, and 2 means a
-monotonic failure triggered the explicit standard-solver fallback.
-
-For concise fit monitoring, ``backgroundmodel_BS(..., diagnostics=True)``
-adds scalar ``dgfit_iterations`` and ``dgfit_converged`` outputs. They are
-absent by default. Complete-orbit WIC comparisons must use an
+was requested, 1 means monotonic solving succeeded throughout, 2 means a
+monotonic failure triggered the ordinary fallback, 3 means monotonic fitting
+failed without fallback, and 4 means the ordinary fallback also failed.
+``dgfit_iterations`` and ``dgfit_converged`` are always included. Complete-
+orbit WIC comparisons must use an
 ``img_variance`` saved from ``read_idl(..., measurement_variance=True)``;
 variance cannot be reconstructed correctly from an already reflattened WIC
 ``img`` field. The comparison script verifies the stored ``poisson_offset``

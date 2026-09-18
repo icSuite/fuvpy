@@ -131,3 +131,8 @@ dmypy.json
 
 # ignore annying mac file stuff
 .DS_Store
+
+# Validation data are distributed separately through Zenodo
+/data/
+/data.zip
+/.data_extract/

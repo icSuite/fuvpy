@@ -6,6 +6,8 @@ that unrelated orbit segments do not share one temporal spline.
 
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
@@ -14,32 +16,26 @@ import fuvpy as fuv
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-EXAMPLE_DATA = REPOSITORY / "data"
-LEGACY_BACKGROUND = EXAMPLE_DATA / "legacy_background"
+DATA_DIRECTORY = REPOSITORY / "data"
+IDL_DATA = DATA_DIRECTORY / "idl_files"
+LEGACY_BACKGROUND = DATA_DIRECTORY / "legacy_nc_files"
 OUTPUT_DIRECTORY = REPOSITORY / "figures" / "model_comparison"
 
 SENSOR_DIRECTORIES = {
-    "WIC": "wic_data",
-    "SI12": "s12_data",
-    "SI13": "s13_data",
+    "wic": "wic_data",
+    "s12": "s12_data",
+    "s13": "s13_data",
 }
 
 BS_SETTINGS = {
     "stop": 0.01,
     "tukeyVal": 5,
-    "dampingVal": 1e-2
+    "dampingVal": 1e-2,
+    "temporal_knot_spacing": 120,
+    "variance_weighted": True,
+    "monotonic": True,
+    "monotonic_fallback": True
 }
-
-
-def split_image_sequences(images, maximum_gap_minutes=10):
-    """Split images when adjacent frames are from different orbit segments."""
-
-    time_gap = np.diff(images.date.values) / np.timedelta64(1, "m")
-    split_after = np.flatnonzero(time_gap > maximum_gap_minutes) + 1
-    indices = np.split(np.arange(images.sizes["date"]), split_after)
-
-    return [images.isel(date=index) for index in indices]
-
 
 def colour_limits(values, symmetric=False):
     """Return readable limits without letting isolated pixels set the scale."""
@@ -71,7 +67,7 @@ def plot_image(axis, values, title, cmap, limits):
     axis.set_axis_off()
 
 
-def plot_frame(original, legacy, m2, m3, frame, output_directory):
+def plot_frame(original, legacy, m2, m3, m4, frame, output_directory):
     """Plot all model variants for one frame."""
     
     # Img, Variance, SZA, DZA
@@ -99,8 +95,11 @@ def plot_frame(original, legacy, m2, m3, frame, output_directory):
     m3_model = m3.dgmodel.isel(date=frame).values
     m3_model_base = m3.dgmodel_base.isel(date=frame).values
     m3_model_sin = m3.dgmodel_sine.isel(date=frame).values    
-    model_values = np.stack([legacy_model, m2_model, m3_model, m3_model_base])
-    model_asym_values = np.stack([legacy_model_sh, m3_model_sin])
+    m4_model = m4.dgmodel.isel(date=frame).values
+    m4_model_base = m4.dgmodel_base.isel(date=frame).values
+    m4_model_sh = m4.dgmodel_sh.isel(date=frame).values
+    model_values = np.stack([legacy_model, m2_model, m3_model, m3_model_base, m4_model, m4_model_base])
+    model_asym_values = np.stack([legacy_model_sh, m3_model_sin, m4_model_sh])
 
     legacy_corrected = legacy.dgimg.isel(date=frame).values
     legacy_corrected_sh = legacy.shimg.isel(date=frame).values
@@ -108,17 +107,22 @@ def plot_frame(original, legacy, m2, m3, frame, output_directory):
     m3_corrected = m3.dgimg.isel(date=frame).values
     m3_corrected_base = m3.img.isel(date=frame).values - m3_model_base
     m3_corrected_sin = m3.img.isel(date=frame).values - m3_model_sin
-    corrected_values = np.stack([legacy_corrected, m2_corrected, m3_corrected, m3_corrected_base, m3_corrected_sin, legacy_corrected_sh])
+    m4_corrected = m4.dgimg.isel(date=frame).values
+    m4_corrected_base = m4.img.isel(date=frame).values - m4_model_base
+    m4_corrected_sh = m4.img.isel(date=frame).values - m4_model_sh
+    corrected_values = np.stack([legacy_corrected, m2_corrected, m3_corrected, m3_corrected_base, m3_corrected_sin, legacy_corrected_sh, m4_corrected, m4_corrected_base, m4_corrected_sh])
 
     legacy_weight = legacy.dgweight.isel(date=frame).values
     sh_weight = legacy.shweight.isel(date=frame).values
     m2_weight = m2.dgweight.isel(date=frame).values
     m3_weight = m3.dgweight.isel(date=frame).values
+    m4_weight = m4.dgweight.isel(date=frame).values
 
     legacy_uncertainty = legacy.dgsigma.isel(date=frame).values
     m2_uncertainty = m2.dgsigma.isel(date=frame).values
     m3_uncertainty = m3.dgsigma.isel(date=frame).values
-    uncertainty_values = np.stack([legacy_uncertainty, m2_uncertainty, m3_uncertainty])
+    m4_uncertainty = m4.dgsigma.isel(date=frame).values
+    uncertainty_values = np.stack([legacy_uncertainty, m2_uncertainty, m3_uncertainty, m4_uncertainty])
 
     image_limits = colour_limits(original_image)
     variance_limits = colour_limits(variance)
@@ -127,7 +131,7 @@ def plot_frame(original, legacy, m2, m3, frame, output_directory):
     corrected_limits = colour_limits(corrected_values, symmetric=True)
     uncertainty_limits = colour_limits(uncertainty_values, symmetric=True)
 
-    figure, axes = plt.subplots(7, 4, figsize=(10, 17.5), sharex=True, sharey=True)
+    figure, axes = plt.subplots(9, 4, figsize=(10, 22.5), sharex=True, sharey=True)
 
     panels = [
         (original_image, "Original image", "viridis", image_limits),
@@ -157,7 +161,15 @@ def plot_frame(original, legacy, m2, m3, frame, output_directory):
         (m3_model_base, "Base model", "seismic", model_limits),
         (m3_corrected_base, "Base corrected", "seismic", corrected_limits),
         (m3_model_sin, "Asymmetric model", "seismic", asym_limits),
-        (m3_corrected_sin, "Asymmetric correction", "seismic", corrected_limits)        
+        (m3_corrected_sin, "Asymmetric correction", "seismic", corrected_limits),
+        (m4_model, "Joint SH model", "seismic", model_limits),
+        (m4_corrected, "Corrected image", "seismic", corrected_limits),
+        (m4_weight, "Tukey weights", "viridis", (0, 1)),
+        (m4_uncertainty, "dgsigma", "seismic", uncertainty_limits),
+        (m4_model_base, "Joint SH base", "seismic", model_limits),
+        (m4_corrected_base, "Base corrected", "seismic", corrected_limits),
+        (m4_model_sh, "SH component", "seismic", asym_limits),
+        (m4_corrected_sh, "SH correction", "seismic", corrected_limits)
     ]
 
     for axis, panel in zip(axes.flat, panels):
@@ -173,57 +185,59 @@ def plot_frame(original, legacy, m2, m3, frame, output_directory):
     plt.close(figure)
 
 
-def process_sensor(sensor, directory):
+def process_sensor(sensor, idl_data_path, legacy_file, output_dir_orbit):
     """Load, fit, and plot every available frame for one sensor."""
 
-    files = sorted((EXAMPLE_DATA / directory).glob("*.idl"))
-    if not files:
-        raise FileNotFoundError(f"No IDL files found for {sensor}")
+    idl_files = sorted(idl_data_path.glob("*.idl"))
 
-    # Reflattening estimates one common WIC background from the loaded image
-    # sequence. The example files contain partial orbits, so keep the original
-    # FUVVIEW3 WIC flat field for this comparison.
-    reflat = sensor == "WIC"
-    #images = fuv.read_idl([str(path) for path in files], dzalim=75, reflat=reflat, measurement_variance=True, poisson_offset=0.5, wic_variance_model="correction_aware")
-    images = fuv.read_idl([str(path) for path in files], dzalim=75, reflat=reflat, measurement_variance=True, poisson_offset=0.5, wic_variance_model='reference', viewing_geometry=True)
+    reflat = sensor == "wic"
+    images = fuv.read_idl(idl_files, dzalim=75, reflat=reflat, measurement_variance=True, poisson_offset=0.5, wic_variance_model='reference', viewing_geometry=True)
 
-    legacy_file = LEGACY_BACKGROUND / f"{sensor.lower()}.nc"
-    if not legacy_file.exists():
-        raise FileNotFoundError(f"Missing {legacy_file}. Run extract_legacy_background.py first")
     with xr.open_dataset(legacy_file) as saved:
         legacy = saved.load()
 
-    sequences = split_image_sequences(images)
-    output_directory = OUTPUT_DIRECTORY / sensor.lower()
+    common_dates = np.intersect1d(images.date.values, legacy.date.values)
+    images = images.sel(date=common_dates)
+    legacy = legacy.sel(date=common_dates)
+
+    keep = images.frame_quality.values >= 2
+    images = images.isel(date=keep)
+    legacy = legacy.isel(date=keep)
+
+    output_directory = output_dir_orbit / sensor.lower()
     output_directory.mkdir(parents=True, exist_ok=True)
 
-    for sequence in sequences:
-        try:
-            legacy_sequence = legacy.sel(date=sequence.date)
-        except KeyError as error:
-            raise KeyError(f"Historical data do not contain every {sensor} frame in this sequence. Rerun extract_legacy_background.py") from error
-
-        settings = dict(BS_SETTINGS)
-        settings["n_tKnots"] = min(5, sequence.sizes["date"])
-
-        # Combined revised model
-        m2 = fuv.backgroundmodel_BS(sequence, variance_weighted=True, monotonic=True, **settings)
+    # Combined revised model
+    m2 = fuv.backgroundmodel_BS(images, **BS_SETTINGS)
         
-        # Asymmetric
-        m3 = fuv.backgroundmodel_BS(sequence, spatial_model="legacy_x_azimuth", directional_x_knots=[-3.5, 0, 1.5, 3.5], spencer_taper=True, variance_weighted=True, monotonic=True, **settings)
+    # Asymmetric
+    m3 = fuv.backgroundmodel_BS(images, spatial_model="legacy_x_azimuth", directional_x_knots=[-3.5, 0, 1.5, 3.5], spencer_taper=True, directional_temporal_knot_spacing=60, **BS_SETTINGS)
 
-        for frame in range(sequence.sizes["date"]):
-            plot_frame(sequence, legacy_sequence, m2, m3, frame, output_directory)
+    # Coestimated spherical-harmonic asymmetry
+    m4 = fuv.backgroundmodel_BS(images, spatial_model="legacy_sh", sh_degree=3, sh_order=3, spencer_taper=True, directional_temporal_knot_spacing=60, **BS_SETTINGS)
 
-    print(f"{sensor}: wrote {len(files)} figures to {output_directory}")
+    for frame in range(images.sizes["date"]):
+        plot_frame(images, legacy, m2, m3, m4, frame, output_directory)
 
 
 def main():
+    required_directories = [IDL_DATA, LEGACY_BACKGROUND]
+    missing_directories = [str(path.relative_to(REPOSITORY)) for path in required_directories if not path.is_dir()]
+    if missing_directories:
+        missing = ", ".join(missing_directories)
+        raise FileNotFoundError(f"Missing fuvpy validation data: {missing}. Run 'python scripts/download_data.py' from the repository root.")
+
     OUTPUT_DIRECTORY.mkdir(parents=True, exist_ok=True)
 
-    for sensor, directory in SENSOR_DIRECTORIES.items():
-        process_sensor(sensor, directory)
-
+    orbits = [int(p.name[6:]) for p in sorted(Path(IDL_DATA).iterdir()) if p.is_dir()]
+    #for orbit in orbits:
+    for orbit in [968]:
+        output_dir_orbit = OUTPUT_DIRECTORY / f"orbit_{orbit:04d}"
+        output_dir_orbit.mkdir(parents=True, exist_ok=True)
+        for sensor, directory in SENSOR_DIRECTORIES.items():
+            idl_data_path = IDL_DATA / f"orbit_{orbit:04d}" / directory
+            legacy_file = LEGACY_BACKGROUND / f"{sensor}_or{orbit:04d}.nc"
+            process_sensor(sensor, idl_data_path, legacy_file, output_dir_orbit)
 
 if __name__ == "__main__":
     main()

@@ -1,6 +1,6 @@
 # Current State
 
-Last reviewed: 2026-09-13
+Last reviewed: 2026-09-18
 Branch: `background_model_asymmetry`
 Status: BS-only implementation complete; production integration remains
 
@@ -11,7 +11,9 @@ It supports:
 
 - the ordinary one-dimensional BS background; and
 - the selected directional model `B0(x) + T(SZA)*S*Bs(x)` through
-  `spatial_model="legacy_x_azimuth"`.
+  `spatial_model="legacy_x_azimuth"`; and
+- the experimental coestimated spherical-harmonic correction through
+  `spatial_model="legacy_sh"`.
 
 The directional model uses `x=cos(SZA)/cos(DZA)`, the pole-safe solar-view
 sine factor `S`, and the optional Spencer taper `T`. The cosine factor is
@@ -24,6 +26,18 @@ experiment have been removed. New corrected-image workflows use `dgimg`.
 Historical NetCDF files with SH fields remain readable as ordinary xarray
 datasets.
 
+The new `legacy_sh` option does not restore the old sequential SH solver. It
+coestimates a monotonic one-dimensional base and a Spencer-tapered,
+non-axisymmetric real SH component in one fit. The historical `n-m` even term
+selection is retained while `m=0` is excluded to reduce overlap with the base.
+The complete validation-orbit comparison confirms that all twelve WIC/SI fits
+are numerically viable with variance weighting after the reviewed problematic
+frames are removed. The SH correction often looks competitive and sometimes
+better, but substantial base/SH cancellation can still occur and some frames
+retain a stronger large-scale gradient. It remains an experimental leading
+alternative rather than a selected production model; see
+`vault/03_Validation/Coestimated SH Asymmetry Test - 2026-09-14.md`.
+
 ## Candidate processing configuration
 
 The current candidate combines:
@@ -33,13 +47,49 @@ backgroundmodel_BS(
     images,
     spatial_model="legacy_x_azimuth",
     directional_x_knots=[-3.5, 0, 1.5, 3.5],
+    temporal_knot_spacing=120,
+    directional_temporal_knot_spacing=60,
     spencer_taper=True,
     variance_weighted=True,
-    monotonic=True
+    monotonic=True,
+    monotonic_fallback=True,
+    dampingVal=1e-2
 )
 ```
 
-The production value of dimensionless `dampingVal` has not been selected.
+The candidate numerical settings were selected on 2026-09-18: 120-minute base
+spacing, 60-minute directional spacing, dimensionless damping `1e-2`,
+measurement-variance weighting, and ordinary-solver fallback after a failed
+monotonic solve. A controlled orbit-0085 WIC test shows that full-orbit reflattening followed by a
+20-frame fit retains the good short-sequence behavior. The poor complete-orbit
+result was subsequently isolated to WIC measurement-variance weighting rather
+than full-orbit reflattening or the five temporal breakpoints: disabling
+variance weighting restores an acceptable long fit. The saved variance remains
+useful downstream, but WIC inverse-variance fitting is not production-ready.
+A follow-up fit restricted to 00:48--04:51 (122 frames) behaved well with
+variance weighting enabled and stayed close to the historical background in
+representative early, middle, and late frames. The failure therefore depends
+on fitting the heterogeneous complete orbit, not on variance weighting being
+intrinsically unusable for every WIC interval.
+
+The final orbit-0085 frames after about 04:49 are saturated garbage images.
+They must be rejected before fitting; their large residual contribution can
+distort the temporally coupled model even under inverse-variance weighting.
+Temporal complexity is now specified by elapsed-time spacing rather than a
+fixed knot count. `temporal_knot_spacing` sets the target spacing for `B0` in
+minutes; the implementation uses the smallest number of equal intervals no
+longer than that target, with both sequence endpoints retained. Directional
+models accept `directional_temporal_knot_spacing`; when omitted it inherits
+the `B0` spacing. The base and directional terms use separate temporal bases,
+so this is a real difference in model freedom rather than metadata only.
+
+The complete-orbit memory blocker is resolved. The solver now exploits the
+separable spatial and temporal basis and accumulates `GTG` and `GTd` frame by
+frame instead of materializing a whole-orbit pixels-by-coefficients matrix.
+The complete 328-frame orbit-0968 WIC asymmetric variance-weighted fit now
+finishes in 32 seconds with a measured peak RSS of 6.2 GiB. The previous dense
+design matrix alone would have required 13.45 GiB, before several similarly
+large working copies.
 
 ## Retained revisions
 
@@ -57,6 +107,15 @@ The production value of dimensionless `dampingVal` has not been selected.
   initial weighted normal matrix.
 - `read_idl(..., measurement_variance=True)` attaches detector measurement
   variance before optional WIC reflattening.
+- `read_idl()` always assigns `frame_quality`: 0 rejected, 1 detector-valid,
+  and 2 science-ready. The initial audited thresholds reject absent mapping
+  or relative signal spread below 0.1 and require mapped absolute MLAT to
+  reach 68 degrees for science-ready status. Thresholds can be overridden.
+- WIC reflattening estimates its shared background from frames with
+  `frame_quality >= 1` but applies the correction to every loaded frame.
+- `backgroundmodel_BS()` defaults to retaining `frame_quality >= 2` before
+  constructing its temporal basis. `minimum_frame_quality=None` disables the
+  filter; datasets without the variable retain backward-compatible behavior.
 - `variance_weighted=True` applies measurement precision to the BS inversion
   without including it in the empirical `dgsigma` calculation.
 - The low-cost monotonic solver has explicit success/fallback flags, and every
@@ -80,7 +139,7 @@ The retained research support is:
 
 ## Verification
 
-The focused suite reports 38 passes. It was consolidated from 88 by combining
+The full suite reports 50 passes. It was consolidated from 88 by combining
 repeated error/parameter cases and removing tests of validation-script plotting
 plumbing; package-level scientific behavior remains covered. `img_variance` now records what it was
 calculated from, which uncertainty sources it excludes, and the deterministic
@@ -100,6 +159,50 @@ path has been removed. It always returns a copy and rejects the obsolete
 `minlat` arguments. Variance-weighted fits always read `img_variance`, and
 production monotonic fits always use the low-cost normal-system solver.
 
+The bundled comparison now also plots the coestimated SH model, base, SH
+component, corrected image, Tukey weights, and `dgsigma` for all 58 frames
+from each sensor.
+
+The complete-orbit SH comparison used the reviewed clean intervals and
+measurement-variance weighting. It fitted 122/122/122 WIC/SI12/SI13 frames for
+orbit 0085, 190/190/190 for orbit 0086, 272/271/272 for orbit 0261, and
+285/283/283 for orbit 0968. All fits succeeded and 2,602 frame panels were
+written under `figures/model_comparison_long_sh_variance_filtered/`.
+
+The accumulated normal system agrees with an explicitly constructed dense
+design to numerical precision. A complete old-versus-new directional,
+variance-weighted monotonic fit agrees to about `2.3e-11` in the modeled and
+corrected images. The complete orbit-0261 comparison also finishes for WIC,
+SI12, and SI13 and writes all requested variance/no-variance diagnostics.
+The same three-way diagnostic analysis was completed for orbit 0968 over the
+requested 2001-10-21 14:57 through 2001-10-22 00:38 interval: 284 WIC frames
+and 282 frames for each SI sensor.
+
+The frame-quality audit now includes variation within individual detector
+rows. `row_relative_spread` stores the coefficient of variation for every
+mapped row and `median_row_relative_spread` summarizes each frame. The default
+minimum is 0.06; rows require at least eight mapped pixels. Orbit-0968 WIC at
+14:00:41 has a median row spread of 0.030,
+while the minimum among the other 893 frames accepted by the preceding rules
+is 0.083. The new criterion therefore removes the detector-wide row-gradient
+frame without discarding another previously accepted validation frame.
+
+Detector-state screening is also part of frame quality. `read_idl()` retains
+`hv_phos` and `hv_mcp`; WIC requires both to be at least 1000 V, while SI
+requires `hv_mcp >= 1000 V`. Correlation is used only after an observed
+detector off-to-on transition. Operational successors remain rejected while
+their common-mapped-pixel correlation with the preceding detector-off frame
+exceeds 0.90. The common mapped area must cover at least 10% of the detector.
+Other quality failures do not start correlation chains.
+
+For orbit 0085, the turn-on rule rejects WIC 00:42--00:46 and makes 00:48:02
+the first science-ready frame. With the default loader geometry, correlations
+with the voltage-off reference are 0.982, 0.980, and 0.515 at 00:44, 00:46,
+and 00:48. Orbit-0968 14:00:41 is rejected independently by its 0.030 median
+row spread, while 14:02:43 is science-ready. Turn-on correlations are stored
+as `turn_on_reference_correlation`; no support field is stored because the
+10% support requirement is fixed metadata on that diagnostic.
+
 ## Production boundary
 
 Do not start complete IMAGE processing yet:
@@ -113,3 +216,29 @@ Do not start complete IMAGE processing yet:
 
 Detailed decisions, algorithms, and audit evidence remain in the dedicated
 vault notes rather than this live status file.
+
+## Complete-orbit comparison data
+
+The external validation corpus is published as Zenodo record 22828032. Its
+stable layout separates full-resolution inputs as
+`data/idl_files/orbit_####/{wic,si12,si13}_data/` from historical products in
+`data/legacy_nc_files/`. The repository ignores the complete `data/` tree.
+`scripts/download_data.py` downloads the record's ZIP archive, verifies its
+Zenodo MD5 checksum, installs the data in the repository, and removes the ZIP.
+`scripts/compare_models.py` checks for both required data subdirectories and
+reports the download command when they are absent.
+
+Orbits 0085, 0086, 0261, and 0968 are complete relative to the historical files
+for all three sensors.
+This corpus remains external because the compressed archive is approximately
+5 GB and is unsuitable for Git.
+
+The legacy NetCDF files store dates rather than literal source filenames; their
+minute timestamps map directly to the IDL filenames. In orbit 0085 WIC, 88 of
+235 saved frames have no pixels in the historical support mask and an entirely
+NaN `dgmodel`; they did not contribute rows to the normal equations. The
+original code nevertheless passed all 235 northern frames, so their timestamps
+set the temporal-knot range and all frames participated in WIC reflattening.
+The long script now reproduces that behavior for every available IDL file and
+leaves pixel exclusion to `backgroundmodel_BS()`. All 235 historical
+orbit-0085 WIC timestamps are now available.

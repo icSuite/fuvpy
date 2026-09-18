@@ -16,6 +16,8 @@ from scipy.optimize import curve_fit, lsq_linear
 from scipy.stats import binned_statistic
 from scipy.linalg import lstsq
 
+from fuvpy.utils.sunlight import subsol
+
 
 def _monotonic_bs_transform(n_scp, n_tcp):
     """Map free baselines and nonnegative increments to BS coefficients.
@@ -38,26 +40,27 @@ def _monotonic_bs_transform(n_scp, n_tcp):
     return transform
 
 
-def _monotonic_base_transform(n_base_scp, n_total_scp, n_tcp):
+def _monotonic_base_transform(n_base_scp, n_base_tcp, n_directional_coefficients):
     """Constrain only the leading one-dimensional base coefficients.
 
     Coefficients after the base belong to the signed directional model and
     remain free.
     """
 
-    n_coefficients = n_total_scp*n_tcp
+    n_base_coefficients = n_base_scp*n_base_tcp
+    n_coefficients = n_base_coefficients + n_directional_coefficients
     transform = np.eye(n_coefficients)
     lower = np.full(n_coefficients, -np.inf)
 
-    for temporal in range(n_tcp):
+    for temporal in range(n_base_tcp):
         baseline = temporal
         for spatial in range(n_base_scp):
-            row = spatial*n_tcp + temporal
+            row = spatial*n_base_tcp + temporal
             transform[row, :] = 0
             transform[row, baseline] = 1
 
             for increment in range(1, spatial + 1):
-                column = increment*n_tcp + temporal
+                column = increment*n_base_tcp + temporal
                 transform[row, column] = 1
                 lower[column] = 0
 
@@ -86,11 +89,15 @@ def _solve_monotonic_bs(weighted_design, weighted_data, damping, n_scp, n_tcp, s
             regularization = np.sqrt(damping_diagonal)[:, None] * transform
             design = np.vstack([design, regularization])
             data = np.r_[data, np.zeros(n_coefficients)]
-    else:
+    elif solver in ['normal', 'normal_system']:
         # Operational calculation: reduce all pixels to the small normal
         # system before applying the same coefficient bounds.
-        normal_matrix = weighted_design.T@weighted_design + damping
-        normal_data = weighted_design.T@weighted_data
+        if solver == 'normal':
+            normal_matrix = weighted_design.T@weighted_design + damping
+            normal_data = weighted_design.T@weighted_data
+        else:
+            normal_matrix = weighted_design + damping
+            normal_data = weighted_data
 
         normal_matrix = transform.T@normal_matrix@transform
         normal_data = transform.T@normal_data
@@ -109,6 +116,8 @@ def _solve_monotonic_bs(weighted_design, weighted_data, damping, n_scp, n_tcp, s
             eigenvalue = np.clip(eigenvalue, 0, None)
             design = np.sqrt(eigenvalue)[:, None] * eigenvector.T
             data = np.linalg.lstsq(design.T, normal_data, rcond=None)[0]
+    else:
+        raise ValueError("solver must be 'full', 'normal', or 'normal_system'")
 
     if lower is None:
         lower = np.zeros(n_coefficients)
@@ -137,6 +146,74 @@ def _normal_matrix_scale(normal_matrix):
     return np.median(supported)
 
 
+def _temporal_spline_basis(time, knot_spacing, order):
+    """Build a temporal B-spline basis from a target spacing in minutes."""
+
+    if isinstance(knot_spacing, (bool, np.bool_)) or not np.isscalar(knot_spacing) or not np.isfinite(knot_spacing) or knot_spacing <= 0:
+        raise ValueError("temporal knot spacing must be a finite positive number of minutes")
+    if not isinstance(order, (int, np.integer)) or order < 0:
+        raise ValueError("tOrder must be a non-negative integer")
+
+    time = np.asarray(time, dtype=float)
+    duration = time[-1] - time[0]
+    if duration < 0 or np.any(np.diff(time) < 0):
+        raise ValueError("image dates must be ordered from earliest to latest")
+
+    if duration == 0:
+        breaks = np.array([time[0], time[0] + 1])
+        knots = breaks
+        effective_order = 0
+        actual_spacing = 0.0
+    else:
+        n_intervals = max(1, int(np.ceil(duration/knot_spacing)))
+        breaks = np.linspace(time[0], time[-1], n_intervals + 1)
+        knots = np.r_[np.repeat(breaks[0], order), breaks, np.repeat(breaks[-1], order)]
+        effective_order = order
+        actual_spacing = duration/n_intervals
+
+    n_control_points = len(knots)-effective_order-1
+    design = BSpline(knots, np.eye(n_control_points), effective_order)(time)
+    return breaks, design, n_control_points, effective_order, actual_spacing
+
+
+def _accumulate_normal_system(spatial_designs, frame_support, base_temporal_design, directional_temporal_design, data, robust_weight, spatial_weight, measurement_weight, pixels_per_frame):
+    """Accumulate the weighted normal system without a full design matrix.
+
+    Base coefficients come first, followed by directional coefficients. Within
+    each block, the spatial basis is outermost and the temporal basis is
+    innermost. The full design is assembled one frame at a time, avoiding a
+    whole-orbit pixels-by-coefficients matrix.
+    """
+
+    n_base_coefficients = spatial_designs[0][0].shape[1]*base_temporal_design.shape[1]
+    n_directional_coefficients = 0
+    if directional_temporal_design is not None:
+        n_directional_coefficients = spatial_designs[0][1].shape[1]*directional_temporal_design.shape[1]
+    n_coefficients = n_base_coefficients + n_directional_coefficients
+    normal_matrix = np.zeros((n_coefficients, n_coefficients))
+    normal_data = np.zeros(n_coefficients)
+
+    for frame, ((base_spatial, directional_spatial), pixel_index) in enumerate(zip(spatial_designs, frame_support)):
+        if pixel_index.size == 0:
+            continue
+
+        data_index = frame*pixels_per_frame + pixel_index
+        fit_weight = np.sqrt(robust_weight[data_index]) * spatial_weight[data_index] * measurement_weight[data_index]
+        base_design = (base_spatial[:, :, None]*base_temporal_design[frame][None, None, :]).reshape((pixel_index.size, -1))
+        if directional_temporal_design is not None:
+            directional_design = (directional_spatial[:, :, None]*directional_temporal_design[frame][None, None, :]).reshape((pixel_index.size, -1))
+            frame_design = np.hstack([base_design, directional_design])
+        else:
+            frame_design = base_design
+
+        weighted_design = frame_design*fit_weight[:, None]
+        weighted_data = data[data_index]*fit_weight
+        normal_matrix += weighted_design.T@weighted_design
+        normal_data += weighted_design.T@weighted_data
+
+    return normal_matrix, normal_data
+
+
 def _spencer_taper_weights(sza):
     """Return the normalized spherical-Chapman profile used by Lompe.
 
@@ -149,6 +226,68 @@ def _spencer_taper_weights(sza):
     table = np.loadtxt(Path(__file__).parents[1]/'data'/'spencer_chapman_taper.txt')
     weight = np.interp(sza, table[:, 0], table[:, 1], left=1, right=0)
     return np.where(np.isfinite(sza), weight, np.nan)
+
+
+def _nonaxisymmetric_sh_keys(max_degree, max_order):
+    """Return the non-axisymmetric terms used by the historical SH model.
+
+    The old residual correction retained terms for which ``n-m`` is even. Its
+    cosine expansion also included ``m=0``. Here both cosine and sine parts
+    start at ``m=1`` because an axisymmetric SH contribution would compete
+    directly with the coestimated one-dimensional base model.
+    """
+
+    if not isinstance(max_degree, (int, np.integer)) or max_degree < 1:
+        raise ValueError("sh_degree must be a positive integer")
+    if not isinstance(max_order, (int, np.integer)) or max_order < 1:
+        raise ValueError("sh_order must be a positive integer")
+
+    return [(degree, order) for degree in range(1, max_degree + 1) for order in range(1, min(degree, max_order) + 1) if (degree - order) % 2 == 0]
+
+
+def _schmidt_legendre(colatitude, max_degree, max_order, keys):
+    """Evaluate the historical Schmidt semi-normalized Legendre functions."""
+
+    theta = np.deg2rad(np.asarray(colatitude, dtype=float).reshape(-1, 1))
+    sine = np.sin(theta)
+    cosine = np.cos(theta)
+
+    functions = {(degree, order): np.zeros_like(theta) for degree in range(max_degree + 1) for order in range(max_degree + 1)}
+    functions[(0, 0)] = np.ones_like(theta)
+    normalization = {(0, 0): 1.0}
+
+    for degree in range(1, max_degree + 1):
+        for order in range(min(degree, max_order) + 1):
+            if degree == order:
+                value = sine*functions[(degree - 1, order - 1)]
+            elif degree == 1:
+                value = cosine*functions[(degree - 1, order)]
+            else:
+                coefficient = ((degree - 1)**2 - order**2)/((2*degree - 1)*(2*degree - 3))
+                value = cosine*functions[(degree - 1, order)] - coefficient*functions[(degree - 2, order)]
+
+            if order == 0:
+                normalization[(degree, 0)] = normalization[(degree - 1, 0)]*(2*degree - 1)/degree
+            else:
+                normalization[(degree, order)] = normalization[(degree, order - 1)]*np.sqrt((degree - order + 1)*(2 if order == 1 else 1)/(degree + order))
+
+            functions[(degree, order)] = value
+
+    return np.hstack([functions[key]*normalization[key] for key in keys])
+
+
+def _real_sh_design(glat, solar_relative_longitude, max_degree, max_order):
+    """Build the non-axisymmetric real SH basis used for the joint model."""
+
+    keys = _nonaxisymmetric_sh_keys(max_degree, max_order)
+    legendre = _schmidt_legendre(90 - np.asarray(glat), max_degree, max_order, keys)
+    longitude = np.deg2rad(np.asarray(solar_relative_longitude)).reshape(-1, 1)
+    orders = np.asarray([order for _, order in keys])[None, :]
+
+    cosine = legendre*np.cos(longitude*orders)
+    sine = legendre*np.sin(longitude*orders)
+    return np.hstack([cosine, sine]), keys
+
 
 def backgroundmodel_BS(imgs,**kwargs):
     '''
@@ -173,17 +312,35 @@ def backgroundmodel_BS(imgs,**kwargs):
         When to stop the iteration. The default is 0.001.
     sKnots : array like, optional
         Location of the spatial Bspline knots. The default is None (default is used).
-    n_tKnots : int, optional
-        Number of temporal knots, equally spaced between the endpoints. The default is 2 (only knots at endpoints)
+    temporal_knot_spacing : float, optional
+        Target spacing between temporal break points for the base model, in
+        minutes. The actual spacing is shortened so both ends of the image
+        sequence are break points. Default is 120 minutes.
+    directional_temporal_knot_spacing : float, optional
+        Target temporal break-point spacing for the directional component, in
+        minutes. If omitted, it uses `temporal_knot_spacing`. This option is
+        only available for directional spatial models.
+    minimum_frame_quality : {0, 1, 2, None}, optional
+        Minimum `frame_quality` retained in the fit. The default is 2
+        (science-ready frames). One also includes detector-valid frames, zero
+        includes all classified frames, and None disables filtering. Datasets
+        without `frame_quality` are left unchanged.
     tOrder : int, optional
         Order of the temporal spline fit. The default is 2.
-    spatial_model : {'legacy', 'legacy_x_azimuth'}, optional
+    spatial_model : {'legacy', 'legacy_x_azimuth', 'legacy_sh'}, optional
         `legacy` fits the ordinary one-dimensional background. The
         `legacy_x_azimuth` model adds a signed solar-view correction in the
-        same legacy coordinate. Default is `legacy`.
+        same legacy coordinate. `legacy_sh` instead adds a coestimated,
+        non-axisymmetric real spherical-harmonic correction. Default is
+        `legacy`.
     directional_x_knots : array like, optional
         Spatial break points for the signed directional spline. By default it
         uses the ordinary unpadded `sKnots`.
+    sh_degree : int, optional
+        Maximum spherical-harmonic degree for `legacy_sh`. Default is 4.
+    sh_order : int, optional
+        Maximum spherical-harmonic order for `legacy_sh`. Default is 4. Only
+        terms with m >= 1 and even n-m are retained.
     spencer_taper : bool, optional
         If True, multiply the directional term by the normalized Spencer
         spherical-Chapman profile. The base model is unchanged. Default is
@@ -216,15 +373,20 @@ def backgroundmodel_BS(imgs,**kwargs):
     '''
 
     # Set keyword arguments to input or default values    
+    sh_options_given = 'sh_degree' in kwargs or 'sh_order' in kwargs
     sOrder = kwargs.pop('sOrder') if 'sOrder' in kwargs.keys() else 3
     dampingVal = kwargs.pop('dampingVal') if 'dampingVal' in kwargs.keys() else 0
     tukeyVal = kwargs.pop('tukeyVal') if 'tukeyVal' in kwargs.keys() else 5
     stop = kwargs.pop('stop') if 'stop' in kwargs.keys() else 1e-3
     sKnots = kwargs.pop('sKnots') if 'sKnots' in kwargs.keys() else None
-    n_tKnots = kwargs.pop('n_tKnots') if 'n_tKnots' in kwargs.keys() else 2
+    temporal_knot_spacing = kwargs.pop('temporal_knot_spacing') if 'temporal_knot_spacing' in kwargs.keys() else 120
+    directional_temporal_knot_spacing = kwargs.pop('directional_temporal_knot_spacing') if 'directional_temporal_knot_spacing' in kwargs.keys() else None
+    minimum_frame_quality = kwargs.pop('minimum_frame_quality') if 'minimum_frame_quality' in kwargs.keys() else 2
     tOrder = kwargs.pop('tOrder') if 'tOrder' in kwargs.keys() else 2
     spatial_model = kwargs.pop('spatial_model') if 'spatial_model' in kwargs.keys() else 'legacy'
     directional_x_knots = kwargs.pop('directional_x_knots') if 'directional_x_knots' in kwargs.keys() else None
+    sh_degree = kwargs.pop('sh_degree') if 'sh_degree' in kwargs.keys() else 4
+    sh_order = kwargs.pop('sh_order') if 'sh_order' in kwargs.keys() else 4
     spencer_taper = bool(kwargs.pop('spencer_taper')) if 'spencer_taper' in kwargs.keys() else False
     variance_weighted = bool(kwargs.pop('variance_weighted')) if 'variance_weighted' in kwargs.keys() else False
     monotonic = bool(kwargs.pop('monotonic')) if 'monotonic' in kwargs.keys() else False
@@ -233,19 +395,40 @@ def backgroundmodel_BS(imgs,**kwargs):
         names = ', '.join(sorted(kwargs))
         raise TypeError(f"Unexpected backgroundmodel_BS keyword argument(s): {names}")
 
-    if spatial_model not in ['legacy', 'legacy_x_azimuth']:
-        raise ValueError("spatial_model must be 'legacy' or 'legacy_x_azimuth'")
+    if spatial_model not in ['legacy', 'legacy_x_azimuth', 'legacy_sh']:
+        raise ValueError("spatial_model must be 'legacy', 'legacy_x_azimuth', or 'legacy_sh'")
 
-    directional_model = spatial_model == 'legacy_x_azimuth'
-    if directional_x_knots is not None and not directional_model:
+    x_directional_model = spatial_model == 'legacy_x_azimuth'
+    sh_directional_model = spatial_model == 'legacy_sh'
+    directional_model = x_directional_model or sh_directional_model
+    if directional_x_knots is not None and not x_directional_model:
         raise ValueError("directional_x_knots is only available for spatial_model='legacy_x_azimuth'")
+    if sh_options_given and not sh_directional_model:
+        raise ValueError("sh_degree and sh_order are only available for spatial_model='legacy_sh'")
     if spencer_taper and not directional_model:
-        raise ValueError("spencer_taper=True is only available for spatial_model='legacy_x_azimuth'")
+        raise ValueError("spencer_taper=True requires a directional spatial model")
+    if directional_temporal_knot_spacing is not None and not directional_model:
+        raise ValueError("directional_temporal_knot_spacing requires a directional spatial model")
+    if minimum_frame_quality is not None and (isinstance(minimum_frame_quality, (bool, np.bool_)) or not isinstance(minimum_frame_quality, (int, np.integer)) or minimum_frame_quality not in [0, 1, 2]):
+        raise ValueError("minimum_frame_quality must be 0, 1, 2, or None")
 
     imgs = imgs.copy(deep=True)
 
     # Add temporal dimension if missing
     if len(imgs.sizes)==2: imgs = imgs.expand_dims('date')
+
+    # Frame quality is assigned by read_idl before WIC reflattening. Subset
+    # before constructing the temporal basis so rejected endpoints do not
+    # change the fit duration or knot placement.
+    frame_quality_filter = 'disabled' if minimum_frame_quality is None else 'not_available'
+    if minimum_frame_quality is not None and 'frame_quality' in imgs:
+        if imgs['frame_quality'].dims != ('date',):
+            raise ValueError("frame_quality must have only the date dimension")
+        keep = imgs['frame_quality'].values >= minimum_frame_quality
+        if not np.any(keep):
+            raise ValueError(f"No frames satisfy minimum_frame_quality={minimum_frame_quality}")
+        imgs = imgs.isel(date=keep)
+        frame_quality_filter = f"frame_quality >= {minimum_frame_quality}"
 
     # Spatial knots and viewing angle correction
     if imgs['id'] in ['WIC','SI12','SI13','UVI']:
@@ -255,7 +438,7 @@ def backgroundmodel_BS(imgs,**kwargs):
             sKnots = [-3.5,-0.25,0,0.25,1.5,3.5]
     elif imgs['id'] == 'VIS':
         if directional_model:
-            raise ValueError("spatial_model='legacy_x_azimuth' requires IMAGE/FUV viewing geometry")
+            raise ValueError("Directional spatial models require IMAGE/FUV viewing geometry")
         sza = imgs['sza'].stack(z=('row','col')).values
         fraction = np.cos(np.deg2rad(sza))
         if sKnots is None: sKnots= [-1,-0.1,0,0.1,0.4,1]
@@ -264,7 +447,8 @@ def backgroundmodel_BS(imgs,**kwargs):
     base_breaks = np.asarray(sKnots, dtype=float)
     sKnots = np.r_[np.repeat(base_breaks[0],sOrder),base_breaks, np.repeat(base_breaks[-1],sOrder)]
 
-    if directional_model:
+    sh_keys = []
+    if x_directional_model:
         if 'solar_view_sine_factor' not in imgs:
             raise ValueError("spatial_model='legacy_x_azimuth' requires solar_view_sine_factor; load IDL files with viewing_geometry=True")
 
@@ -274,6 +458,17 @@ def backgroundmodel_BS(imgs,**kwargs):
         directional_x_knots = np.r_[np.repeat(directional_x_breaks[0],sOrder),directional_x_breaks, np.repeat(directional_x_breaks[-1],sOrder)]
         solar_view_sine = imgs['solar_view_sine_factor'].stack(z=('row','col')).values
         directional_taper = _spencer_taper_weights(sza) if spencer_taper else np.ones_like(sza)
+    elif sh_directional_model:
+        if 'glat' not in imgs or 'glon' not in imgs:
+            raise ValueError("spatial_model='legacy_sh' requires glat and glon")
+
+        sh_keys = _nonaxisymmetric_sh_keys(sh_degree, sh_order)
+        geographic_latitude = imgs['glat'].stack(z=('row','col')).values
+        geographic_longitude = imgs['glon'].stack(z=('row','col')).values
+        _, subsolar_longitude = subsol(imgs['date'].values)
+        subsolar_longitude = np.asarray(subsolar_longitude)
+        solar_relative_longitude = (geographic_longitude - subsolar_longitude[:, None] + 180) % 360 - 180
+        directional_taper = _spencer_taper_weights(sza) if spencer_taper else np.ones_like(sza)
 
     # Minuets since first image
     time=(imgs['date'].values-imgs['date'].values[0])/ np.timedelta64(1, 'm')
@@ -282,57 +477,44 @@ def backgroundmodel_BS(imgs,**kwargs):
     n_t = fraction.shape[0]
     n_s = fraction.shape[1]
 
-    # Temporal knots
-    if n_t==1:
-        temporal_breaks = np.linspace(time[0], time[-1]+1, n_tKnots)
-        tKnots = temporal_breaks
-        tOrder = 0
+    # Temporal bases. The directional component may vary on a different time
+    # scale while retaining the same spatial support and IRLS weights.
+    temporal_breaks, M_base, n_base_tcp, base_tOrder, actual_temporal_knot_spacing = _temporal_spline_basis(time, temporal_knot_spacing, tOrder)
+    if directional_model:
+        if directional_temporal_knot_spacing is None:
+            directional_temporal_knot_spacing = temporal_knot_spacing
+        directional_temporal_breaks, M_directional, n_directional_tcp, directional_tOrder, actual_directional_temporal_knot_spacing = _temporal_spline_basis(time, directional_temporal_knot_spacing, tOrder)
     else:
-        temporal_breaks = np.linspace(time[0], time[-1], n_tKnots)
-        tKnots = np.r_[np.repeat(temporal_breaks[0],tOrder),temporal_breaks, np.repeat(temporal_breaks[-1],tOrder)]
+        directional_temporal_breaks = None
+        M_directional = None
+        n_directional_tcp = 0
+        directional_tOrder = None
+        actual_directional_temporal_knot_spacing = None
 
-    # Number of control points
-    n_tcp = len(tKnots)-tOrder-1
+    # Number of spatial control points
     n_base_scp = len(sKnots)-sOrder-1
-    n_directional_scp = len(directional_x_knots)-sOrder-1 if directional_model else 0
-    n_scp = n_base_scp + n_directional_scp
-
-    # Temporal design matix
-    M = BSpline(tKnots, np.eye(n_tcp), tOrder)(time)
-
-    # Spatial design matrix
-    G_g=[]
-    G_base_g=[]
-    G_sine_g=[]
-    G_s=[]
-    for i in range(n_t):
-        G_base = BSpline(sKnots, np.eye(n_base_scp), sOrder)(fraction[i,:])
-        if directional_model:
-            G_directional = BSpline(directional_x_knots, np.eye(n_directional_scp), sOrder)(fraction[i,:])
-            G_sine = G_directional*(directional_taper[i]*solar_view_sine[i])[:, None]
-            G = np.hstack([G_base, G_sine])
-            G_base_g.append(G_base)
-            G_sine_g.append(G_sine)
-        else:
-            G = G_base
-        G_t = np.zeros((n_s, n_scp*n_tcp))
-        for j in range(n_tcp):
-            G_t[:, np.arange(j, n_scp*n_tcp, n_tcp)] = G*M[i, j]
-
-        G_g.append(G)
-        G_s.append(G_t)
-    G_s=np.vstack(G_s)
+    if x_directional_model:
+        n_directional_scp = len(directional_x_knots)-sOrder-1
+    elif sh_directional_model:
+        n_directional_scp = 2*len(sh_keys)
+    else:
+        n_directional_scp = 0
+    n_base_coefficients = n_base_scp*n_base_tcp
+    n_directional_coefficients = n_directional_scp*n_directional_tcp
+    n_coefficients = n_base_coefficients + n_directional_coefficients
 
     # Index of data to use in model
     fit_support = (sza >= 0) & (np.isfinite(imgs['img'].stack(z=('row','col')).values)) & (fraction>sKnots[0]) & (fraction<sKnots[-1])
-    if directional_model:
+    if x_directional_model:
         fit_support &= np.isfinite(solar_view_sine) & np.isfinite(directional_taper)
         fit_support &= (fraction>directional_x_knots[0]) & (fraction<directional_x_knots[-1])
+    elif sh_directional_model:
+        fit_support &= np.isfinite(geographic_latitude) & np.isfinite(solar_relative_longitude) & np.isfinite(directional_taper)
 
     monotonic_transform = None
     monotonic_lower = None
     if monotonic and directional_model:
-        monotonic_transform, monotonic_lower = _monotonic_base_transform(n_base_scp, n_scp, n_tcp)
+        monotonic_transform, monotonic_lower = _monotonic_base_transform(n_base_scp, n_base_tcp, n_directional_coefficients)
 
     # Give every populated geometry bin equal total squared influence.
     spatial_bins = np.arange(sKnots[0], sKnots[-1] + 0.1, 0.1)
@@ -366,6 +548,24 @@ def backgroundmodel_BS(imgs,**kwargs):
 
         measurement_w[ind] = 1/np.sqrt(measurement_variance[ind])
 
+    # Evaluate spatial bases only where image rows contribute to the fit.
+    # The temporal basis is applied while accumulating the normal system, so
+    # no pixels-by-coefficients whole-orbit matrix is materialized.
+    frame_support = [np.flatnonzero(fit_support[frame]) for frame in range(n_t)]
+    spatial_designs = []
+    for frame, pixel_index in enumerate(frame_support):
+        G_base = BSpline(sKnots, np.eye(n_base_scp), sOrder)(fraction[frame, pixel_index])
+        if x_directional_model:
+            G_directional = BSpline(directional_x_knots, np.eye(n_directional_scp), sOrder)(fraction[frame, pixel_index])
+            G_sine = G_directional*(directional_taper[frame, pixel_index]*solar_view_sine[frame, pixel_index])[:, None]
+            spatial_designs.append((G_base, G_sine))
+        elif sh_directional_model:
+            G_sh, _ = _real_sh_design(geographic_latitude[frame, pixel_index], solar_relative_longitude[frame, pixel_index], sh_degree, sh_order)
+            G_sh *= directional_taper[frame, pixel_index, None]
+            spatial_designs.append((G_base, G_sh))
+        else:
+            spatial_designs.append((G_base, None))
+
     # Iterativaly solve the inverse problem
     diff = 1e10
     iteration = 0
@@ -376,23 +576,20 @@ def backgroundmodel_BS(imgs,**kwargs):
     solver_message = 'success'
     fit_failed = False
     while (diff>stop)&(iteration < 100):
-        # Keep robust, spatial-sampling, and measurement-precision roles
-        # visible before forming the weighted least-squares system. Tukey
-        # values are objective weights; the other two are row multipliers.
-        fit_w = np.sqrt(w[ind]) * ws[ind] * measurement_w[ind]
-        weighted_design = G_s[ind, :] * fit_w[:, None]
-        weighted_data = d_s[ind] * fit_w
-        GTG = weighted_design.T@weighted_design
-        GTd = weighted_design.T@weighted_data
+        # Tukey values are objective weights. Spatial and measurement terms
+        # are row multipliers. Accumulate their normal system frame by frame
+        # so memory follows the input images rather than a much larger
+        # pixels-by-coefficients design matrix.
+        GTG, GTd = _accumulate_normal_system(spatial_designs, frame_support, M_base, M_directional, d_s, w, ws, measurement_w, n_s)
 
         # Fix the damping scale before later IRLS iterations change w.
         if R is None:
             gtg_magnitude = _normal_matrix_scale(GTG)
-            R = dampingVal*gtg_magnitude*np.eye(G_s.shape[1])
+            R = dampingVal*gtg_magnitude*np.eye(n_coefficients)
 
         if use_monotonic:
             try:
-                m_s = _solve_monotonic_bs(weighted_design, weighted_data, R, n_scp, n_tcp, 'normal', monotonic_transform, monotonic_lower)
+                m_s = _solve_monotonic_bs(GTG, GTd, R, n_base_scp, n_base_tcp, 'normal_system', monotonic_transform, monotonic_lower)
             except RuntimeError as error:
                 if not monotonic_fallback:
                     warnings.warn(f"Monotonic B-spline solve failed; returning an all-NaN background product: {error}", RuntimeWarning, stacklevel=2)
@@ -415,15 +612,30 @@ def backgroundmodel_BS(imgs,**kwargs):
                 solver_message = str(error)
                 fit_failed = True
                 break
-        mNew    = M@m_s.reshape((n_scp, n_tcp)).T
-        dm=[]
-        for i, tt in enumerate(time):
-            dm.append(G_g[i]@mNew[i, :])
-
-        dm=np.array(dm).squeeze()
+        base_coefficients = m_s[:n_base_coefficients].reshape((n_base_scp, n_base_tcp))
+        base_amplitude = M_base@base_coefficients.T
         if directional_model:
-            dm_base = np.array([G_base_g[i]@mNew[i, :n_base_scp] for i in range(n_t)]).squeeze()
-            dm_sine = np.array([G_sine_g[i]@mNew[i, n_base_scp:] for i in range(n_t)]).squeeze()
+            directional_coefficients = m_s[n_base_coefficients:].reshape((n_directional_scp, n_directional_tcp))
+            directional_amplitude = M_directional@directional_coefficients.T
+            mNew = np.hstack([base_amplitude, directional_amplitude])
+        else:
+            directional_amplitude = None
+            mNew = base_amplitude
+        dm = np.full((n_t, n_s), np.nan)
+        if directional_model:
+            dm_base = np.full((n_t, n_s), np.nan)
+            dm_directional = np.full((n_t, n_s), np.nan)
+
+        for frame, ((G_base, G_directional), pixel_index) in enumerate(zip(spatial_designs, frame_support)):
+            frame_base = G_base@base_amplitude[frame]
+            if directional_model:
+                frame_directional = G_directional@directional_amplitude[frame]
+                dm[frame, pixel_index] = frame_base + frame_directional
+                dm_base[frame, pixel_index] = frame_base
+                dm_directional[frame, pixel_index] = frame_directional
+            else:
+                dm[frame, pixel_index] = frame_base
+
         residuals = (d_s[ind] - dm.flatten()[ind])
 
         if iteration == 0:
@@ -451,7 +663,10 @@ def backgroundmodel_BS(imgs,**kwargs):
         imgs['dgnorm_model'] = np.nan
         if directional_model:
             imgs['dgmodel_base'] = (['date','row','col'], failed_field.copy())
-            imgs['dgmodel_sine'] = (['date','row','col'], failed_field.copy())
+            if x_directional_model:
+                imgs['dgmodel_sine'] = (['date','row','col'], failed_field.copy())
+            else:
+                imgs['dgmodel_sh'] = (['date','row','col'], failed_field.copy())
     else:
         normM = np.sqrt(np.average(m_s**2))
         normR = np.sqrt(np.average(residuals**2,weights=w[ind]))
@@ -463,7 +678,10 @@ def backgroundmodel_BS(imgs,**kwargs):
         imgs['dgnorm_model'] = normM
         if directional_model:
             imgs['dgmodel_base'] = (['date','row','col'],dm_base.reshape((n_t,len(imgs.row),len(imgs.col))))
-            imgs['dgmodel_sine'] = (['date','row','col'],dm_sine.reshape((n_t,len(imgs.row),len(imgs.col))))
+            if x_directional_model:
+                imgs['dgmodel_sine'] = (['date','row','col'],dm_directional.reshape((n_t,len(imgs.row),len(imgs.col))))
+            else:
+                imgs['dgmodel_sh'] = (['date','row','col'],dm_directional.reshape((n_t,len(imgs.row),len(imgs.col))))
     imgs['dgsolver_flag'] = solver_flag
     if directional_model and spencer_taper:
         imgs['spencer_taper_factor'] = (['date','row','col'],directional_taper.reshape((n_t,len(imgs.row),len(imgs.col))))
@@ -480,7 +698,10 @@ def backgroundmodel_BS(imgs,**kwargs):
     imgs['dgsigma'] = xr.where(fit_support,imgs['dgsigma'],np.nan)
     if directional_model:
         imgs['dgmodel_base'] = xr.where(fit_support,imgs['dgmodel_base'],np.nan)
-        imgs['dgmodel_sine'] = xr.where(fit_support,imgs['dgmodel_sine'],np.nan)
+        if x_directional_model:
+            imgs['dgmodel_sine'] = xr.where(fit_support,imgs['dgmodel_sine'],np.nan)
+        else:
+            imgs['dgmodel_sh'] = xr.where(fit_support,imgs['dgmodel_sh'],np.nan)
 
     # Add attributes
     monotonic_constraint = 'none'
@@ -495,7 +716,10 @@ def backgroundmodel_BS(imgs,**kwargs):
         'spatial_order': int(sOrder),
         'temporal_knots_minutes_from_first_image': temporal_breaks,
         'temporal_knot_count': int(len(temporal_breaks)),
-        'temporal_order': int(tOrder),
+        'temporal_order': int(base_tOrder),
+        'temporal_knot_spacing_target_minutes': float(temporal_knot_spacing),
+        'temporal_knot_spacing_actual_minutes': float(actual_temporal_knot_spacing),
+        'frame_quality_filter': frame_quality_filter,
         'noise_model': 'binned',
         'spatial_weighting': 'bin_population',
         'dgsigma_estimation': 'initial_fit',
@@ -515,6 +739,12 @@ def backgroundmodel_BS(imgs,**kwargs):
         'fit_iterations': int(iteration),
         'fit_converged': int(fit_converged)
     }
+    if directional_model:
+        imgs['dgmodel'].attrs['directional_temporal_knots_minutes_from_first_image'] = directional_temporal_breaks
+        imgs['dgmodel'].attrs['directional_temporal_knot_count'] = int(len(directional_temporal_breaks))
+        imgs['dgmodel'].attrs['directional_temporal_order'] = int(directional_tOrder)
+        imgs['dgmodel'].attrs['directional_temporal_knot_spacing_target_minutes'] = float(directional_temporal_knot_spacing)
+        imgs['dgmodel'].attrs['directional_temporal_knot_spacing_actual_minutes'] = float(actual_directional_temporal_knot_spacing)
     imgs['dgimg'].attrs = {'long_name': 'BS corrected image'}
     imgs['dgweight'].attrs = {'long_name': 'BS model weights'}
     imgs['dgsigma'].attrs = {'long_name': 'BS model spread'}
@@ -526,12 +756,21 @@ def backgroundmodel_BS(imgs,**kwargs):
         'flag_meanings': 'standard_requested monotonic_succeeded monotonic_failed_standard_fallback monotonic_failed_no_fallback monotonic_failed_standard_fallback_failed',
         'solver_message': solver_message
     }
-    if directional_model:
+    if x_directional_model:
         imgs['dgmodel'].attrs['directional_x_knots'] = directional_x_breaks
         imgs['dgmodel_base'].attrs = {'long_name': 'Azimuth-independent legacy-coordinate background component'}
         imgs['dgmodel_sine'].attrs = {'long_name': 'Sine-like solar-view directional background component'}
-        if spencer_taper:
-            imgs['spencer_taper_factor'].attrs = {'long_name': 'Normalized spherical-Chapman production factor', 'units': '1'}
+    elif sh_directional_model:
+        terms = [f"cos({degree},{order})" for degree, order in sh_keys] + [f"sin({degree},{order})" for degree, order in sh_keys]
+        imgs['dgmodel'].attrs['sh_degree'] = int(sh_degree)
+        imgs['dgmodel'].attrs['sh_order'] = int(sh_order)
+        imgs['dgmodel'].attrs['sh_terms'] = ' '.join(terms)
+        imgs['dgmodel'].attrs['sh_axisymmetric_terms'] = 'excluded'
+        imgs['dgmodel'].attrs['sh_coordinate_system'] = 'geographic_latitude_solar_relative_longitude'
+        imgs['dgmodel_base'].attrs = {'long_name': 'Azimuth-independent legacy-coordinate background component'}
+        imgs['dgmodel_sh'].attrs = {'long_name': 'Spencer-tapered non-axisymmetric spherical-harmonic background component'}
+    if directional_model and spencer_taper:
+        imgs['spencer_taper_factor'].attrs = {'long_name': 'Normalized spherical-Chapman production factor', 'units': '1'}
     imgs['dgfit_iterations'].attrs = {'long_name': 'Number of BS IRLS iterations'}
     imgs['dgfit_converged'].attrs = {'long_name': 'BS IRLS convergence status'}
     return imgs

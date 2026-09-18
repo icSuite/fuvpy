@@ -15,8 +15,8 @@ def test_solar_viewing_factors_are_independent_of_polar_longitude():
 
 def test_bundled_idl_geometry_reproduces_stored_dza():
     for name in ['wic_data', 's12_data', 's13_data']:
-        directory = Path(__file__).parents[1]/f'data/{name}'
-        filename = sorted(directory.glob('*.idl'))[0]
+        directory = Path(__file__).parents[1]/'data/idl_files/orbit_0085'/name
+        filename = next(directory.glob('*20001370048.idl'))
         image = read_idl(str(filename), reflat=False, viewing_geometry=True)
         valid = np.isfinite(image['dza'].values)
 

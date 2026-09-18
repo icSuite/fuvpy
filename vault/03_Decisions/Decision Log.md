@@ -263,3 +263,84 @@ become harder to maintain than the small production package warranted. The
 reduced suite retains the scientific contracts for `dgsigma`, spatial and
 measurement weighting, monotonic fitting and fallback, directional modeling,
 measurement variance, viewing geometry, and NetCDF serialization.
+
+## 2026-09-18 — Use one ordinal frame-quality classification
+
+**Decision:** `read_idl()` assigns one per-frame `frame_quality` value: 0 is
+rejected, 1 is detector-valid, and 2 is science-ready. WIC reflattening
+estimates its shared background from frames with quality at least 1 while
+applying the correction to every frame. `backgroundmodel_BS()` defaults to
+fitting frames with quality at least 2.
+
+**Rationale:** A single ordered classification is enough for pipeline control
+and avoids several overlapping boolean variables. The FUVVIEW3
+`calibration_flag` remains independent provenance and is not a quality test.
+
+## 2026-09-18 — Remove the sine-factor spline experiment
+
+**Decision:** Remove `spatial_model="legacy_sine_spline"`, its
+`directional_sine_knots` and `sine_zero_constraint` controls, its saved model
+component, and the dedicated comparison and validation material.
+
+**Rationale:** The experiment was not selected for production and retained a
+second directional formulation that increased the public and internal model
+surface without a demonstrated benefit. The maintained directional model is
+`legacy_x_azimuth`; `legacy_sh` remains an explicitly experimental alternative.
+
+## 2026-09-18 — Require operational detector state for usable frames
+
+**Decision:** Store `hv_phos` and `hv_mcp` from every IDL file. Quality 1 and 2
+require `hv_mcp >= 1000 V`; WIC additionally requires
+`hv_phos >= 1000 V`.
+
+**Rationale:** Geometry and image spread alone classified orbit-0085 WIC at
+00:42:03 as science-ready despite both detector voltages being zero. The two
+following nominal-voltage frames remained near-uniform, while normal signal
+began with the third operational frame at 00:48:02. The reviewed instrument
+papers and FUVVIEW3 source document reduced-HV operation but do not specify a
+post-turn-on settling duration. The initial fixed two-frame rule was therefore
+subsequently replaced by the image-correlation decision below.
+
+## 2026-09-18 — Distribute validation data outside Git
+
+**Decision:** Keep the complete `data/` directory out of Git and distribute it
+through Zenodo record 22828032. Use `scripts/download_data.py` to verify and
+install the archive, and make comparison scripts fail early with the download
+instruction when required data are absent.
+
+**Rationale:** The archive is approximately 5 GB compressed. Keeping it in the
+repository would make ordinary cloning and branch history unnecessarily large,
+while a fixed Zenodo record provides a citable, versioned validation corpus.
+
+## 2026-09-18 — Select the production numerical candidate
+
+**Decision:** Use `legacy_x_azimuth` with directional knots
+`[-3.5, 0, 1.5, 3.5]`, Spencer tapering, 120-minute base temporal spacing,
+60-minute directional temporal spacing, dimensionless `dampingVal=1e-2`,
+measurement-variance weighting, monotonic base fitting, and
+`monotonic_fallback=True`.
+
+**Rationale:** These settings capture the selected directional architecture and
+the choices confirmed after complete-orbit experiments. They remain a candidate
+until the exact configuration is rerun on the four validation orbits.
+
+## 2026-09-18 — Use row variation and detector turn-on correlation
+
+**Decision:** Require a median within-row coefficient of variation of at least
+0.06, using rows with at least eight mapped pixels. Store both the per-row and
+median metrics. Use correlation only after an observed detector off-to-on
+transition. Reject operational successors while their Pearson correlation
+with the preceding detector-off frame over common mapped pixels exceeds 0.90.
+Require at least 10% common mapped detector coverage and save the correlation
+as `turn_on_reference_correlation`.
+
+**Rationale:** Orbit-0968 WIC at 14:00:41 is nearly uniform within each row but
+has enough top-to-bottom variation to pass the whole-image spread check. Its
+median row spread is 0.030, compared with a minimum of 0.083 among the other
+893 frames accepted by the preceding validation rules. Generalizing the
+validation metric beyond the whole-image spread catches this failure directly.
+The correlation check retains the successful orbit-0085 turn-on rejection but
+is not physically justified after unrelated mapping or signal-quality failures.
+Restricting it to detector transitions and common mapped pixels prevents an
+arbitrary rejection chain, while the 10% support requirement prevents a small
+footprint from rejecting a complete frame.

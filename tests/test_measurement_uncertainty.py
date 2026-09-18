@@ -115,6 +115,8 @@ def _mock_imageinfo(include_calibration=True):
         "glon": np.array([np.zeros(shape)]),
         "dza": np.array([np.full(shape, 30.0)]),
         "sza": np.array([np.full(shape, 100.0)]),
+        "hv_phos": np.array([4000.0]),
+        "hv_mcp": np.array([1200.0]),
         "time": np.array([[2000137, 0]])
     }
     if include_calibration:
