@@ -1,13 +1,26 @@
 # Background Fit Uncertainty Architecture
 
-Last reviewed: 2026-09-12
+Last reviewed: 2026-10-19 (separate2D/shared pointing added; covariance history remains historical)
 Status: superseded for SH/SBS; BS uncertainty material remains historical
 
 > Scope update: active fuvpy development now uses only
-> `backgroundmodel_BS()`. The SH and SBS sections below document earlier
+> `backgroundmodel_BS()` and the separate `backgroundmodel_BS2D()`.
+> [[2D Background and Shared Metadata Pointing]] owns the new method.
+> The SH and SBS sections below document earlier
 > experiments and are not part of the maintained processing architecture.
 
 ## Implementation checkpoint
+
+Active BS-only addition: optional `dgsigma_freeze_iteration=2` estimates the
+pooled residual-spread relation after fit1 and again after fit2 with incoming
+Tukey/population weights, then retains the second sigma field. At least one
+following solve uses it. Default1 preserves original behavior. Supplied
+sigma coefficients cannot be reestimated; sharing stored[a,b] into another
+fit still reevaluates that relation at each current prediction. Robust pixel
+weights continue updating in all cases. This changes an opt-in rejection-scale
+estimate, not detector variance or fitted-background posterior uncertainty.
+75 focused background tests pass. icBuilder owns the complete-orbit scale
+calibration and limited repaired292 comparison; no production choice follows.
 
 The fixed-weight BS and conditional SH covariance, corrected-image diagonal,
 coefficient-space sampling, full repeated BS and BS-to-SH fits, diagnostics,
@@ -177,6 +190,47 @@ fit and then keeps it fixed while later Tukey weights and model coefficients
 continue to update. Alternative freeze iterations and diagnostic scale
 histories belonged to the discarded experimental implementation and are no
 longer exposed.
+
+Opt-in addition reviewed 2026-10-17: `store_sigma_model=True` retains the
+estimated [a,b] in `dgmodel.attrs['sigma_model_coefficients']` without changing
+the default numerical fields. `sigma_model_coefficients=[a,b]` instead skips
+the bin regression and evaluates this supplied empirical relation at every
+IRLS prediction. It does not inherit pixel Tukey weights or supply a shape
+prior. Fitting one date per call then permits independent frame solves that
+share an orbit-calibrated scale; calling with multiple dates still uses the
+normal temporal bases. The scale is neither detector variance nor a posterior
+background uncertainty, and the first-stage estimate depends on the same
+images used by those frame fits. This is an icBuilder background experiment,
+not a new covariance/uncertainty implementation.
+
+Optional `initial_robust_weights` (2026-10-18) seeds only the first single-date
+solve, with supplied sigma. Every fitted pixel, including initial zeros, is
+then reweighted from its current residual. Its damping scale is computed
+from all-ones weights so the converged regularization is identical to the
+ordinary frame objective. It supplies no persistent mask or background-shape
+penalty. It cannot combine with an active shape prior. icBuilder's real trial
+finds little final improvement despite a better first solve; initialization
+alone does not resolve its nightside oversubtraction. Its user rejects the
+shape prior below as pulling toward a faulty background. Both remain opt-in
+diagnostic capabilities; no uncertainty or production-default change follows.
+
+Further opt-in addition reviewed 2026-10-18: `background_prior` plus
+`background_prior_strength=lambda` penalizes single-frame prediction
+departures from a supplied orbit background. Both data and penalty use the
+same bin-population and detector-variance multipliers, but the penalty has no
+Tukey rejection. Lambda1 matches the un-rejected data quadratic. Numerical
+damping acts on coefficient departure from a feasible projected prior center;
+the monotonic-center solve uses the existing fallback handling. Weights start
+from fresh current-frame residuals against that reference and update normally
+using supplied sigma. No first-pass pixel weights are inherited. The diagnostic
+penalty/(penalty+data) normal-matrix trace fraction is not a probability or
+measured quiet-pixel fraction. This empirical regularization borrows the same
+images through the first fit and does not create an independent likelihood or
+calibrated posterior covariance. Moderate widespread aurora may still enter
+the fitted background. Existing defaults are unchanged. Optional
+`store_spatial_coefficients=True` saves framewise spline amplitudes for
+evaluating the same fitted function after a separately specified geometry
+change; the icBuilder trial owns the scientific comparison.
 
 The BS spatial sampling multiplier is fixed to bin-population weighting. Every
 populated geometry bin receives equal total least-squares weight. Because row

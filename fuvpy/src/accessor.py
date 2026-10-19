@@ -1,5 +1,6 @@
 import xarray as xr
 from fuvpy.src.background import backgroundmodel_BS
+from fuvpy.src.background2d import backgroundmodel_BS2D
 from fuvpy.src.boundaries import boundarymodel_BS,boundarymodel_F,detect_boundaries
 from fuvpy.src.plotting import plotimg,plot_backgroundmodel_BS,pplot,plot_ltlat,plotboundaries
 
@@ -13,6 +14,9 @@ class FuvAccessor:
     # Accessors to background models
     def backgroundmodel_BS(self,**kwargs):
         return backgroundmodel_BS(self._obj,**kwargs)
+
+    def backgroundmodel_BS2D(self, **kwargs):
+        return backgroundmodel_BS2D(self._obj, **kwargs)
         
     # Accessors to boundary models
     def detect_boundaries(self,**kwargs):

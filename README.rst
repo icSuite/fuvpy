@@ -90,6 +90,102 @@ variance cannot be reconstructed correctly from an already reflattened WIC
 and WIC pre-reflattening provenance attributes before using that variance.
 
 
+Separate 2D temporal and independent backgrounds
+================================================
+
+``backgroundmodel_BS()`` retains its existing defaults and one-dimensional
+model, including its optional tapered sine asymmetry. The separate
+``backgroundmodel_BS2D()`` fits a cubic surface in
+``x=cos(SZA)/cos(DZA)`` and the exact stored ``solar_view_sine_factor``.
+The latter includes illumination and viewing amplitudes; it is not raw
+azimuth or a normalized sine. There is no additional asymmetric term.
+
+Load measurement variance and viewing geometry, then call::
+
+    import fuvpy as fuv
+
+    images = fuv.read_idl(
+        filenames, viewing_geometry=True,
+        measurement_variance=True, poisson_offset=0.5
+    )
+    result = fuv.backgroundmodel_BS2D(images, dgsigma_freeze_iteration=2)
+
+The xarray accessor ``images.fuv.backgroundmodel_BS2D(...)`` is also available.
+Use ``reflat=False`` when loading SI12/SI13. The new method defaults to
+measurement-variance weighting, monotonic x coefficients, dense13-control
+x knots, four sine controls, a quadratic120-minute temporal target,
+``dampingVal=0.01``, ``tukeyVal=5``, and ``stop=0.01``. ``sKnots`` and
+``sine_knots`` configure cubic break points. Sine break points span[-1,1].
+
+Sigma is estimated after every temporal fit through the requested positive
+integer iteration, then that per-pixel field freezes. At least one following
+weighted solve uses the final estimate and the temporal model converges.
+Independent frame fits run automatically, sharing only the final orbit
+``sigma²=a*background²+b`` relation. They evaluate it at their own current
+backgrounds and start with fresh Tukey weights. No temporal shape prior or
+inherited pixel weights constrain the frame fits.
+
+Temporal results retain ``dgmodel``, ``dgimg``, ``dgweight`` and ``dgsigma``.
+Independent results use ``dgmodel_independent``, ``dgimg_independent``,
+``dgweight_independent`` and ``dgsigma_independent``. Both coefficient tensors,
+sigma-estimation history, iteration counts and convergence diagnostics are
+saved. Temporal fields are never overwritten by the independent stage.
+Sigma is empirical residual spread, separate from detector measurement
+variance and fitted-background uncertainty. A failed/nonconverged2D solve
+raises an error rather than silently returning partial fits.
+
+Shared metadata pointing correction
+===================================
+
+Both methods accept a sensor-keyed mapping and optional
+``pointing_correction=True``. Load all three sensors with
+``pointing_metadata=True``; this retains original spacecraft/camera metadata,
+native coordinate grids and millisecond timestamps, and enables viewing
+geometry. Existing loader defaults and outputs are unchanged when disabled::
+
+    sensors = {
+        'WIC': fuv.read_idl(wic_files, pointing_metadata=True,
+                            measurement_variance=True, poisson_offset=0.5),
+        'SI12': fuv.read_idl(si12_files, pointing_metadata=True, reflat=False,
+                             measurement_variance=True, poisson_offset=0.5),
+        'SI13': fuv.read_idl(si13_files, pointing_metadata=True, reflat=False,
+                             measurement_variance=True, poisson_offset=0.5)
+    }
+    results = fuv.backgroundmodel_BS2D(
+        sensors, pointing_correction=True,
+        pointing_options={'method': 'clock_phase'},
+        dgsigma_freeze_iteration=2
+    )
+
+``fuv.backgroundmodel_BS(sensors, pointing_correction=True, ...)`` enables the
+same correction for the1D method, retaining that method's temporal-only
+behavior. A single-sensor correction request is rejected: the shared state
+must be repaired consistently in WIC, SI12 and SI13. All corrections are off
+by default.
+
+The shared WIC reference repairs isolated spacecraft-position outliers using
+a robust local cubic. ``method='clock_phase'`` additionally smooths the
+clock-aware phase with an eleven-frame local quadratic; ``method='position'``
+selects position-only repair. Camera alignments remain fixed. Corrections
+are evaluated at each camera's precise time on its native grid, without
+brightness or limb fitting. Geographic coordinates, SZA/DZA, both solar-view
+factors and historical magnetic coordinates are recalculated together. The
+packaged epoch1997 Apex table preserves FUVVIEW3's coordinate convention.
+
+Counts and detector variance remain unchanged. Corrected science coordinates
+retain the intersection of original mapping and corrected visibility/DZA
+support. Diagnostics record original spacecraft state, coordinate hashes,
+position/phase corrections and unsupported intervals. Missing spins, short
+segments and reference-time boundaries are not extrapolated. This repairs
+metadata consistency; it is not an independent attitude determination.
+
+Use complete-orbit metadata before selecting science frames. The public
+``fuv.correct_pointing(sensors, ...)`` returns corrected copies separately
+when hemisphere selection or other preprocessing must occur before fitting.
+After that shared step, call either background method with correction off.
+Already corrected inputs reject a second correction request.
+
+
 Dependencies
 ============
 fuvpy depends on the following:

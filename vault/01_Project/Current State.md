@@ -1,13 +1,114 @@
 # Current State
 
-Last reviewed: 2026-09-18
+Last reviewed: 2026-10-19
 Branch: `background_model_asymmetry`
-Status: BS-only implementation complete; production integration remains
+Status: original1D preserved; separate2D and shared metadata pointing implemented; pipeline integration pending
+
+## Latest: separate2D and joint metadata correction implemented
+
+User confirms implementation of a second2D method while preserving existing1D
+behavior/defaults. Public backgroundmodel_BS2D automatically converges temporal
+x/sine fits then independent frame fits, sharing the configurable final sigma
+relation. Temporal dgmodel/dgimg/dgweight/dgsigma remain; independent products
+append _independent. Both stages and diagnostics are saved. Sigma-freeze
+iteration is any positive integer below max_iterations, default2.
+
+Both methods accept WIC/SI12/SI13 mappings with optional shared metadata
+pointing correction, defaultoff. Loader pointing_metadata=True retains state
+and exact times. Joint correction repairs one WIC-referenced spacecraft
+solution across all cameras and recalculates geographic/magnetic/background
+geometry on native grids. No image fitting; counts/variance/alignments retained.
+
+127 tests pass, including bitwise frozen1D defaults and joint1D/2D integration.
+Full85 model comparisons and full968 shared-correction+2D fits pass all sensors;
+metadata85 also passes. Wheel/source/data packaging checks pass. Details and
+local evidence are owned by [[2D Background and Shared Metadata Pointing]].
+The icBuilder pipeline has not been switched. Next: pipeline integration.
+
+## Earlier opt-in: reestimate sigma after the second fit
+
+`dgsigma_freeze_iteration=2` estimates pooled sigma after fit1 and again after
+the Tukey-weighted fit2, then freezes that second sigma field. A following
+weighted solve is mandatory even with loose stopping tolerance. Default1 is
+unchanged; supplied sigma coefficients cannot be reestimated. Stored[a,b]
+describe the last estimate. Tukey weights continue updating normally.
+75 focused background tests pass, including default preservation, weighted
+reestimation, frozen field, following-solve use and invalid-option checks.
+
+icBuilder's full312-frame orbit calibration exactly reproduces the original
+first estimate and verifies final sigma frozen at estimate2. Sigma at modeled
+background1000 decreases665→355. Its repaired292 independent-frame comparison
+is visually modest, in the same direction but smaller than the earlier manual
+quiet-scale trial. Geometry/knots/variance/population weights/ridge remain
+fixed; only[a,b] are shared, not an orbit shape or Tukey weights. No production
+default selected. icBuilder owns the private frame evidence and proposed
+separate SZA/DZA surface with limited azimuth terms; that spatial change is
+not implemented.
+
+## Earlier icBuilder direction: initialize from orbit Tukey weights
+
+icBuilder's user rejects the background-shape prior and accepts the known
+frame292 metadata position repair. New `initial_robust_weights` optionally
+seeds the first single-frame solve with supplied objective weights and sigma.
+Every fitted pixel is reweighted afterwards, including initial zeros. The
+all-ones damping scale is retained, isolating initialization from persistent
+regularization changes. Cannot combine this with an active shape penalty.
+67 focused background tests pass, including unchanged all-ones behavior,
+recovery of rejected quiet data and mostly-auroral nightside synthetic truth.
+
+The icBuilder fourteen-frame trial with repaired292 geometry finds little
+final real-image improvement: reweighting largely removes the initial
+benefit. All42 fits converge; initial zeros demonstrably recover. Warm start
+alone is not a successful fix for the observed nightside oversubtraction.
+Further auroral-rejection strategy is unresolved; no production change.
+
+## Earlier opt-in orbit-background shape constraint (user rejected for icBuilder)
+
+`backgroundmodel_BS` now accepts `background_prior` and nonnegative
+`background_prior_strength` for a single frame with supplied empirical sigma.
+It adds a fixed population/measurement-weighted prediction-departure penalty
+to the robust pixel objective; lambda1 matches the un-rejected data quadratic.
+Numerical damping is centered on a feasible projected prior and fresh Tukey
+weights initialize against that reference. Monotonic projection honors the
+usual fallback flags. Fully rejected data can yield a prior-based prediction.
+Zero strength preserves existing outputs exactly. This is empirical shape
+regularization, not a calibrated prior variance or covariance calculation.
+
+`store_spatial_coefficients=True` saves per-frame base/directional amplitudes
+in `dgmodel_spatial_coefficients` without changing fitted fields. This permits
+evaluating the frozen fitted function after a separately estimated geometry
+repair. 59 focused background tests pass, including unchanged defaults,
+prediction reconstruction, weighted penalty identity, narrow cubic support,
+failure handling and moderate broad-aurora attenuation versus strength.
+
+icBuilder owns the fourteen-frame 0968 comparison and separate repaired-position
+frame292 trial. All60 independent fits converge; the complete stored baseline
+reproduces exactly. Strong regularization restores old background artifacts;
+moderate widespread aurora can still be absorbed. No production strength or
+uniform improvement/auroral-preservation claim is adopted.
+
+## Opt-in shared residual-scale experiment
+
+For the icBuilder independent-frame background trial, `backgroundmodel_BS`
+now accepts `store_sigma_model=True` to save the empirical [a,b] relation
+sigma²=a*background²+b in `dgmodel.attrs['sigma_model_coefficients']`.
+`sigma_model_coefficients=[a,b]` supplies that relation instead of estimating
+frame-bin noise statistics, evaluating it at the current model each IRLS
+iteration. Tukey weights initialize afresh. The shared scale remains separate
+from measurement variance and background-fit uncertainty.
+
+Default calls retain their existing numerical behavior and output fields.
+The focused tests include exact stored/default equivalence, supplied
+scale use, fresh weighting, coefficient validation, NetCDF serialization and
+known-truth abrupt-background/aurora recovery and monotonic behavior. Eight
+icBuilder 0968 preview fits converge; their mixed visual results are owned by
+icBuilder's `Background Subtraction - Independent Frame Refinement` note.
+No default algorithm, temporal settings or production choice changed.
 
 ## Active background architecture
 
-fuvpy now has one background-removal function: `backgroundmodel_BS()`.
-It supports:
+The original background-removal entry point is `backgroundmodel_BS()`; the
+separate `backgroundmodel_BS2D()` is described above. The original supports:
 
 - the ordinary one-dimensional BS background; and
 - the selected directional model `B0(x) + T(SZA)*S*Bs(x)` through

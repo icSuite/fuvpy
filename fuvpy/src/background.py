@@ -6,6 +6,7 @@ Created on Fri Sep 30 09:28:25 2022
 @author: aohma
 """
 from pathlib import Path
+from collections.abc import Mapping
 import warnings
 
 import numpy as np
@@ -295,8 +296,9 @@ def backgroundmodel_BS(imgs,**kwargs):
 
     Parameters
     ----------
-    imgs : xarray.Dataset
-        Dataset with the FUV images, imported by readFUVimage()
+    imgs : xarray.Dataset or sensor-keyed mapping of Datasets
+        FUV images imported by read_idl(). Shared pointing correction requires
+        all three sensors in one mapping.
     sOrder : int, optional
         Order of the spatial spline fit. The default is 3.
     dampingVal : float, optional
@@ -348,6 +350,46 @@ def backgroundmodel_BS(imgs,**kwargs):
     variance_weighted : bool, optional
         If True, multiply each fitted row by
         `1/sqrt(imgs['img_variance'])`. Default is False.
+    pointing_correction : bool, optional
+        Apply shared metadata-only pointing correction before fitting. Default
+        False preserves existing behavior. True requires a mapping containing
+        WIC, SI12 and SI13 Datasets loaded with pointing_metadata=True.
+        Returns a sensor-keyed mapping of fits. Single-sensor correction is
+        rejected because shared spacecraft repairs must reach all sensors.
+    pointing_options : dict, optional
+        Options passed to correct_pointing when pointing_correction=True.
+    sigma_model_coefficients : array like, optional
+        Supplied nonnegative [a, b] for the empirical residual-scale relation
+        `sigma**2 = a*dgmodel**2 + b`. Reevaluate this relation after each fit
+        instead of estimating it from bins. Robust weights still start fresh.
+        This scale is separate from detector variance and fit uncertainty.
+    store_sigma_model : bool, optional
+        Save the estimated [a, b] in dgmodel's `sigma_model_coefficients`
+        attribute. Default is False. Supplied coefficients are always saved.
+    dgsigma_freeze_iteration : {1, 2}, optional
+        Default1 estimates sigma after the first fit. Value2 estimates it
+        again after the second fit, using the incoming Tukey weights, then
+        freezes that sigma field. At least one subsequent fit uses the new
+        scale. Incompatible with supplied sigma_model_coefficients.
+    initial_robust_weights : array like or xarray.DataArray, optional
+        Initial Tukey objective weights in [0, 1], with the same shape as img.
+        For a single frame with supplied sigma. Used for the first solve only;
+        every fitted pixel, including initial zeros, is reweighted afterwards.
+        Numerical damping retains its all-pixels initial scale so only the
+        robust initialization changes. Cannot combine with background_prior.
+    background_prior : array like or xarray.DataArray, optional
+        Preferred background prediction with the same shape as img. Available
+        for a single frame with supplied sigma_model_coefficients. Its penalty
+        uses fixed bin-population and measurement weights, without Tukey
+        rejection. This is empirical shape regularization, not new data.
+    background_prior_strength : float, optional
+        Nonnegative relative strength of the prediction penalty. Zero disables
+        it. One matches the total un-rejected data quadratic. The standard
+        numerical damping is centered on the projected prior when enabled.
+    store_spatial_coefficients : bool, optional
+        Save per-frame spatial spline amplitudes in dgmodel_spatial_coefficients
+        for evaluating the same fitted function at another geometry. Default
+        is False; this does not change the fitted numerical fields.
     monotonic : bool, optional
         If True, constrain the fitted background to be non-decreasing with
         the legacy coordinate `cos(SZA)/cos(DZA)`. For the directional model,
@@ -372,7 +414,27 @@ def backgroundmodel_BS(imgs,**kwargs):
               fallback, or 4 failed ordinary fallback)
     '''
 
-    # Set keyword arguments to input or default values    
+    # Shared correction precedes every sensor fit, without changing defaults.
+    pointing_correction = kwargs.pop('pointing_correction', False)
+    pointing_options = kwargs.pop('pointing_options', None)
+    if not isinstance(pointing_correction, (bool, np.bool_)):
+        raise ValueError('pointing_correction must be boolean')
+    if pointing_options is not None and not isinstance(pointing_options, dict):
+        raise ValueError('pointing_options must be a dictionary')
+    if pointing_options and not pointing_correction:
+        raise ValueError('pointing_options requires pointing_correction=True')
+    if isinstance(imgs, Mapping) and not isinstance(imgs, xr.Dataset):
+        if not imgs:
+            raise ValueError('At least one sensor dataset is required')
+        sensors = imgs
+        if pointing_correction:
+            from fuvpy.src.pointing import correct_pointing
+            sensors = correct_pointing(sensors, **(pointing_options or {}))
+        return {sensor: backgroundmodel_BS(data, **kwargs) for sensor, data in sensors.items()}
+    if pointing_correction:
+        raise ValueError('Shared pointing correction requires a WIC/SI12/SI13 mapping')
+
+    # Set keyword arguments to input or default values
     sh_options_given = 'sh_degree' in kwargs or 'sh_order' in kwargs
     sOrder = kwargs.pop('sOrder') if 'sOrder' in kwargs.keys() else 3
     dampingVal = kwargs.pop('dampingVal') if 'dampingVal' in kwargs.keys() else 0
@@ -389,11 +451,36 @@ def backgroundmodel_BS(imgs,**kwargs):
     sh_order = kwargs.pop('sh_order') if 'sh_order' in kwargs.keys() else 4
     spencer_taper = bool(kwargs.pop('spencer_taper')) if 'spencer_taper' in kwargs.keys() else False
     variance_weighted = bool(kwargs.pop('variance_weighted')) if 'variance_weighted' in kwargs.keys() else False
+    sigma_model_coefficients = kwargs.pop('sigma_model_coefficients', None)
+    store_sigma_model = bool(kwargs.pop('store_sigma_model', False))
+    dgsigma_freeze_iteration = kwargs.pop('dgsigma_freeze_iteration', 1)
+    initial_robust_weights = kwargs.pop('initial_robust_weights', None)
+    background_prior = kwargs.pop('background_prior', None)
+    background_prior_strength = kwargs.pop('background_prior_strength', 0)
+    store_spatial_coefficients = bool(kwargs.pop('store_spatial_coefficients', False))
     monotonic = bool(kwargs.pop('monotonic')) if 'monotonic' in kwargs.keys() else False
     monotonic_fallback = bool(kwargs.pop('monotonic_fallback')) if 'monotonic_fallback' in kwargs.keys() else False
     if kwargs:
         names = ', '.join(sorted(kwargs))
         raise TypeError(f"Unexpected backgroundmodel_BS keyword argument(s): {names}")
+
+    if isinstance(dgsigma_freeze_iteration, (bool, np.bool_)) or not isinstance(dgsigma_freeze_iteration, (int, np.integer)) or dgsigma_freeze_iteration not in [1, 2]:
+        raise ValueError("dgsigma_freeze_iteration must be1 or2")
+    if dgsigma_freeze_iteration == 2 and sigma_model_coefficients is not None:
+        raise ValueError("dgsigma_freeze_iteration=2 cannot reestimate supplied sigma_model_coefficients")
+    if sigma_model_coefficients is not None:
+        sigma_model_coefficients = np.asarray(sigma_model_coefficients, dtype=float)
+        if sigma_model_coefficients.shape != (2,) or np.any(~np.isfinite(sigma_model_coefficients)) or np.any(sigma_model_coefficients < 0) or not np.any(sigma_model_coefficients > 0):
+            raise ValueError("sigma_model_coefficients must contain two finite nonnegative values, with at least one positive")
+        sigma_model_coefficients = sigma_model_coefficients.copy()
+    stored_sigma_model = sigma_model_coefficients
+    if isinstance(background_prior_strength, (bool, np.bool_)) or not np.isscalar(background_prior_strength) or not np.isfinite(background_prior_strength) or background_prior_strength < 0:
+        raise ValueError("background_prior_strength must be a finite nonnegative scalar")
+    use_prior = background_prior_strength > 0
+    if use_prior and (background_prior is None or sigma_model_coefficients is None):
+        raise ValueError("A background prior requires background_prior and supplied sigma_model_coefficients")
+    if initial_robust_weights is not None and (use_prior or sigma_model_coefficients is None):
+        raise ValueError("initial_robust_weights requires supplied sigma and cannot combine with a background prior")
 
     if spatial_model not in ['legacy', 'legacy_x_azimuth', 'legacy_sh']:
         raise ValueError("spatial_model must be 'legacy', 'legacy_x_azimuth', or 'legacy_sh'")
@@ -415,7 +502,7 @@ def backgroundmodel_BS(imgs,**kwargs):
     imgs = imgs.copy(deep=True)
 
     # Add temporal dimension if missing
-    if len(imgs.sizes)==2: imgs = imgs.expand_dims('date')
+    if 'date' not in imgs.img.dims: imgs = imgs.expand_dims('date')
 
     # Frame quality is assigned by read_idl before WIC reflattening. Subset
     # before constructing the temporal basis so rejected endpoints do not
@@ -566,6 +653,43 @@ def backgroundmodel_BS(imgs,**kwargs):
         else:
             spatial_designs.append((G_base, None))
 
+    if initial_robust_weights is not None:
+        if n_t != 1:
+            raise ValueError("initial_robust_weights is supported only for a single frame")
+        if isinstance(initial_robust_weights, xr.DataArray):
+            if initial_robust_weights.dims != imgs.img.dims:
+                raise ValueError("initial_robust_weights dimensions must match img")
+            xr.align(imgs.img, initial_robust_weights, join='exact')
+        initial = np.asarray(initial_robust_weights, dtype=float)
+        if initial.shape != imgs.img.shape:
+            raise ValueError("initial_robust_weights must match img shape")
+        if np.any(~np.isfinite(initial.reshape(-1)[ind])) or np.any((initial.reshape(-1)[ind] < 0) | (initial.reshape(-1)[ind] > 1)) or not np.any(initial.reshape(-1)[ind] > 0):
+            raise ValueError("initial_robust_weights must be finite in [0, 1] at fitted pixels, with positive support")
+        unweighted_matrix, _ = _accumulate_normal_system(spatial_designs, frame_support, M_base, M_directional, d_s, w, ws, measurement_w, n_s)
+        initial_damping_scale = _normal_matrix_scale(unweighted_matrix)
+        w[ind] = initial.reshape(-1)[ind]
+
+    # Anchor predictions over this frame's fitted support. Fix the prior
+    # quadratic before robust rejection; aurora cannot erase this constraint.
+    if use_prior:
+        if n_t != 1:
+            raise ValueError("background_prior is supported only for a single frame")
+        if isinstance(background_prior, xr.DataArray):
+            if background_prior.dims != imgs.img.dims:
+                raise ValueError("background_prior dimensions must match img")
+            xr.align(imgs.img, background_prior, join='exact')
+        prior = np.asarray(background_prior, dtype=float)
+        if prior.shape != imgs.img.shape or np.any(~np.isfinite(prior.reshape(-1)[ind])):
+            raise ValueError("background_prior must match img shape and be finite at fitted pixels")
+        prior_matrix, prior_data = _accumulate_normal_system(spatial_designs, frame_support, M_base, M_directional, prior.reshape(-1), w, ws, measurement_w, n_s)
+        prior_coefficients = lstsq(prior_matrix, prior_data, lapack_driver='gelsy')[0]
+        a, b = sigma_model_coefficients
+        prior_sigma = np.sqrt(a*prior.reshape(-1)[ind]**2 + b)
+        if np.any(~np.isfinite(prior_sigma)) or np.any(prior_sigma <= 0):
+            raise ValueError("Supplied sigma model must give positive finite scales at the prior")
+        prior_residual = d_s[ind] - prior.reshape(-1)[ind]
+        w[ind] = (1 - np.minimum(1, (prior_residual/(tukeyVal*prior_sigma))**2))**2
+
     # Iterativaly solve the inverse problem
     diff = 1e10
     iteration = 0
@@ -584,11 +708,22 @@ def backgroundmodel_BS(imgs,**kwargs):
 
         # Fix the damping scale before later IRLS iterations change w.
         if R is None:
-            gtg_magnitude = _normal_matrix_scale(GTG)
+            gtg_magnitude = initial_damping_scale if initial_robust_weights is not None else _normal_matrix_scale(prior_matrix if use_prior else GTG)
             R = dampingVal*gtg_magnitude*np.eye(n_coefficients)
+
+        if use_prior:
+            prior_trace_fraction = background_prior_strength*np.trace(prior_matrix)/(np.trace(GTG) + background_prior_strength*np.trace(prior_matrix))
+            GTG += background_prior_strength*prior_matrix
+            GTd += background_prior_strength*prior_data + R@prior_coefficients
 
         if use_monotonic:
             try:
+                if use_prior and iteration == 0:
+                    # Choose a feasible center for unobserved coefficients.
+                    # Keep this solve inside the normal fallback handling.
+                    projected_prior = _solve_monotonic_bs(prior_matrix, prior_data, np.zeros_like(prior_matrix), n_base_scp, n_base_tcp, 'normal_system', monotonic_transform, monotonic_lower)
+                    GTd += R@(projected_prior - prior_coefficients)
+                    prior_coefficients = projected_prior
                 m_s = _solve_monotonic_bs(GTG, GTd, R, n_base_scp, n_base_tcp, 'normal_system', monotonic_transform, monotonic_lower)
             except RuntimeError as error:
                 if not monotonic_fallback:
@@ -640,10 +775,22 @@ def backgroundmodel_BS(imgs,**kwargs):
 
         if iteration == 0:
             sigma = np.full_like(d_s,np.nan)
-            sigma[ind] = _noisemodel_binned(fraction.flatten()[ind], d_s[ind], dm.flatten()[ind], w[ind]*ws[ind]**2, sKnots)
+        if sigma_model_coefficients is None and iteration < dgsigma_freeze_iteration:
+            if store_sigma_model:
+                sigma[ind], stored_sigma_model = _noisemodel_binned(fraction.flatten()[ind], d_s[ind], dm.flatten()[ind], w[ind]*ws[ind]**2, sKnots, return_coefficients=True)
+            else:
+                sigma[ind] = _noisemodel_binned(fraction.flatten()[ind], d_s[ind], dm.flatten()[ind], w[ind]*ws[ind]**2, sKnots)
+        if sigma_model_coefficients is not None:
+            a, b = sigma_model_coefficients
+            sigma[ind] = np.sqrt(a*dm.flatten()[ind]**2 + b)
+            if np.any(~np.isfinite(sigma[ind])) or np.any(sigma[ind] <= 0):
+                raise ValueError("Supplied sigma model must give positive finite scales at fitted pixels")
         w[ind] = (1 - np.minimum(1,(residuals/(tukeyVal*sigma[ind]))**2))**2
 
         if m is not None: diff = np.sqrt(np.mean((mNew-m)**2))/(1+np.sqrt(np.mean(mNew**2)))
+        if sigma_model_coefficients is None and iteration < dgsigma_freeze_iteration:
+            # Consume the final sigma estimate in another weighted solve.
+            diff = 1e10
         m = mNew
         iteration += 1
 
@@ -669,7 +816,7 @@ def backgroundmodel_BS(imgs,**kwargs):
                 imgs['dgmodel_sh'] = (['date','row','col'], failed_field.copy())
     else:
         normM = np.sqrt(np.average(m_s**2))
-        normR = np.sqrt(np.average(residuals**2,weights=w[ind]))
+        normR = np.nan if use_prior and not np.any(w[ind] > 0) else np.sqrt(np.average(residuals**2,weights=w[ind]))
         imgs['dgmodel'] = (['date','row','col'],(dm).reshape((n_t,len(imgs.row),len(imgs.col))))
         imgs['dgimg'] = imgs['img']-imgs['dgmodel']
         imgs['dgweight'] = (['date','row','col'],(w).reshape((n_t,len(imgs.row),len(imgs.col))))
@@ -688,6 +835,10 @@ def backgroundmodel_BS(imgs,**kwargs):
     fit_converged = False if fit_failed else iteration < 100 and np.isfinite(diff) and diff <= stop
     imgs['dgfit_iterations'] = iteration
     imgs['dgfit_converged'] = fit_converged
+    if store_spatial_coefficients:
+        amplitudes = np.full((n_t, n_base_scp + n_directional_scp), np.nan) if fit_failed else mNew
+        imgs['dgmodel_spatial_coefficients'] = (['date', 'dg_spatial_coefficient'], amplitudes)
+        imgs['dgmodel_spatial_coefficients'].attrs = {'long_name': 'Per-frame spatial amplitudes; base first, then directional', 'base_count': n_base_scp, 'directional_count': n_directional_scp}
 
     # Do not return extrapolated models or fitting weights outside the pixels
     # that actually contributed to the inverse problem.
@@ -720,9 +871,9 @@ def backgroundmodel_BS(imgs,**kwargs):
         'temporal_knot_spacing_target_minutes': float(temporal_knot_spacing),
         'temporal_knot_spacing_actual_minutes': float(actual_temporal_knot_spacing),
         'frame_quality_filter': frame_quality_filter,
-        'noise_model': 'binned',
+        'noise_model': 'binned' if sigma_model_coefficients is None else 'supplied_quadratic',
         'spatial_weighting': 'bin_population',
-        'dgsigma_estimation': 'initial_fit',
+        'dgsigma_estimation': 'initial_fit' if sigma_model_coefficients is None else 'supplied_relation_each_iteration',
         'robust_weighting': 'tukey_bisquare',
         'tukey_value': float(tukeyVal),
         'measurement_variance': 'img_variance' if variance_weighted else 'not_used',
@@ -739,6 +890,16 @@ def backgroundmodel_BS(imgs,**kwargs):
         'fit_iterations': int(iteration),
         'fit_converged': int(fit_converged)
     }
+    if stored_sigma_model is not None:
+        imgs['dgmodel'].attrs['sigma_model_coefficients'] = stored_sigma_model
+        imgs['dgmodel'].attrs['sigma_model_equation'] = 'residual_scale_squared = a*background_squared + b; not detector variance or background uncertainty'
+    if dgsigma_freeze_iteration == 2:
+        imgs['dgmodel'].attrs.update({'dgsigma_estimation': 'first_two_fits_then_frozen', 'dgsigma_freeze_iteration': 2})
+    if initial_robust_weights is not None:
+        imgs['dgmodel'].attrs['robust_initialization'] = 'supplied initial objective weights; all fitted pixels reweighted after every solve'
+    if use_prior:
+        imgs['dgmodel'].attrs.update({'background_prior_strength': float(background_prior_strength), 'background_prior_penalty': 'Fixed population/measurement-weighted squared prediction departure; numerical damping centered on projected prior', 'robust_initialization': 'fresh residuals against supplied prior'})
+        imgs['dgmodel'].attrs['background_prior_trace_fraction'] = float(prior_trace_fraction)
     if directional_model:
         imgs['dgmodel'].attrs['directional_temporal_knots_minutes_from_first_image'] = directional_temporal_breaks
         imgs['dgmodel'].attrs['directional_temporal_knot_count'] = int(len(directional_temporal_breaks))
@@ -826,7 +987,7 @@ def _binned_noise_statistics(fraction, d, dm, w, sKnots):
     return np.asarray(model_squared), np.asarray(residual_squared)
 
 
-def _noisemodel_binned(fraction, d, dm, w, sKnots):
+def _noisemodel_binned(fraction, d, dm, w, sKnots, return_coefficients=False):
     """Estimate residual spread without repeating bin statistics per pixel."""
 
     model_squared, residual_squared = _binned_noise_statistics(fraction, d, dm, w, sKnots)
@@ -839,4 +1000,5 @@ def _noisemodel_binned(fraction, d, dm, w, sKnots):
 
     coefficients, _ = curve_fit(func, model_squared, residual_squared, bounds=(0, np.inf))
 
-    return np.sqrt(func(dm**2, *coefficients))
+    sigma = np.sqrt(func(dm**2, *coefficients))
+    return (sigma, coefficients) if return_coefficients else sigma

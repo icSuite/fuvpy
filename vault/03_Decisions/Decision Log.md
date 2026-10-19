@@ -1,5 +1,21 @@
 # Decision Log
 
+Last reviewed: 2026-10-19
+
+## 2026-10-19 — Keep1D defaults; add separate2D and shared metadata pointing
+
+Confirmed user requirements: preserve backgroundmodel_BS and its defaults.
+Add a separate2D x/sine method with configurable sigma freezing, automatic
+independent fits after temporal convergence and separately saved outputs.
+Both methods may enable metadata-only pointing correction, shared across
+WIC/SI12/SI13. The user explicitly authorized implementation after reviewing
+this design. Existing1D optional controls are retained; correction defaults
+are off. New2D defaults match the reviewed sigma2 workflow, with fresh Tukey
+weights in independent fits. Pipeline integration is a separate next step.
+
+[[2D Background and Shared Metadata Pointing]] owns implemented conventions,
+legacy magnetic mapping, validation and public API.
+
 ## 2026-09-12 — Remove obsolete examples and rejected model paths
 
 **Decision:** Remove the article-specific examples and generated comparison

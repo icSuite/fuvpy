@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # from scipy.io import idl
 from scipy.io import readsav
@@ -33,7 +33,7 @@ DEFAULT_FRAME_QUALITY_THRESHOLDS = {
 }
 
 
-def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True, measurement_variance=False, poisson_offset=0.0, wic_variance_model='reference', viewing_geometry=False, frame_quality_thresholds=None):
+def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True, measurement_variance=False, poisson_offset=0.0, wic_variance_model='reference', viewing_geometry=False, frame_quality_thresholds=None, pointing_metadata=False):
     '''
     Load FUV images into a xarray.Dataset
 
@@ -69,6 +69,13 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
         If True, reconstruct and store the pole-safe solar-view cosine and
         sine factors. The reconstructed DZA is checked against the DZA stored
         by FUVVIEW3. Default is False.
+    pointing_metadata : bool, optional
+        Retain spacecraft state, camera alignment, exact millisecond
+        pointing_time and native coordinate metadata for shared WIC/SI12/SI13
+        correction. Also enables viewing_geometry. Default False leaves
+        existing output fields unchanged.
+        Fit both background methods to a sensor mapping with
+        pointing_correction=True to enable the shared repair.
     frame_quality_thresholds : dict, optional
         Overrides for ``minimum_mapped_fraction``,
         ``minimum_relative_spread``,
@@ -115,6 +122,8 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
     'row': rows of the detector
     'col': columns of the detector
     '''
+    if pointing_metadata:
+        viewing_geometry = True
     if isinstance(filenames, str):
         filenames = [filenames]
 
@@ -142,6 +151,23 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
         img = img.expand_dims(date=[image_time])
         img['hv_phos'] = (['date'], [float(imageinfo['hv_phos'][0])])
         img['hv_mcp'] = (['date'], [float(imageinfo['hv_mcp'][0])])
+
+        if pointing_metadata:
+            vectors = ['O_GCI', 'A_GCI3', 'SC_SV']
+            scalars = ['SPIN_PHASE', 'SPIN', 'INST_AZIMUTH', 'INST_CO_ELEV', 'INST_ROLL', 'LAT_CTR', 'LON_CTR', 'EMIS_HGT']
+            available = {name.upper() for name in imageinfo.dtype.names}
+            missing = [name for name in vectors+scalars+['TIME'] if name not in available]
+            if missing:
+                raise ValueError('Pointing metadata requires FUVVIEW3 fields: '+', '.join(missing))
+            for name in vectors:
+                img[name] = (['date', 'pointing_xyz'], np.asarray(imageinfo[name.lower()][0], dtype=float).reshape(1, 3))
+            for name in scalars:
+                img[name] = ('date', [int(imageinfo[name.lower()][0]) if name == 'SPIN' else float(imageinfo[name.lower()][0])])
+            stamp = imageinfo['time'][0]
+            exact_time = datetime.strptime(str(int(stamp[0])), '%Y%j')+timedelta(milliseconds=int(stamp[1]))
+            img['pointing_time'] = ('date', [np.datetime64(exact_time, 'ns')])
+            for name in ['GLAT', 'GLON', 'SZA', 'DZA']:
+                img['pointing_'+name] = (['date', 'row', 'col'], np.asarray(imageinfo[name.lower()][0])[None].copy())
 
         coordinates = ['mlat','mlon','mlt','glat','glon','sza','dza']
         fillvals = [-1e+31,-1e+31,-1e+31,-1e+31,-1e+31,-1,-1]
@@ -204,6 +230,11 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
     imgs = xr.concat(imgs, dim='date')
     imgs = imgs.assign({'id':  imageinfo['inst_id'][0].strip().decode('utf8')})
     imgs = _add_frame_quality(imgs, frame_quality_thresholds)
+    if pointing_metadata:
+        imgs.attrs['pointing_dzalim'] = float(dzalim)
+        imgs.attrs['pointing_metadata'] = 'Original FUVVIEW3 state and native coordinates retained; correction not yet applied'
+        imgs.O_GCI.attrs = {'long_name': 'Original spacecraft position in GCI', 'units': 'km'}
+        imgs.pointing_time.attrs = {'long_name': 'Original IMAGE timestamp including milliseconds'}
 
     # Use the calibrated detector image before optional WIC reflattening.
     # Reflattening is treated as a deterministic additive adjustment, so this

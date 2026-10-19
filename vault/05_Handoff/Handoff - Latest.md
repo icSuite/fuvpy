@@ -1,8 +1,144 @@
 # Handoff - Latest
 
-Last updated: 2026-09-18
+Last reviewed: 2026-10-19
 Branch: `background_model_asymmetry`
-Checkpoint: frame-quality filtering implemented; sine-spline experiment removed
+Checkpoint: separate2D and joint metadata correction implemented; pipeline integration next
+
+## Latest implementation: preserve1D, add2D and shared pointing
+
+User authorized implementation after the design-only turn. Existing1D method
+and defaults remain, protected by a frozen65603e0 numerical reference. New
+backgroundmodel_BS2D is public and available through the fuv accessor. It
+converges the temporal x/sine surface, with configurable sigma-freeze iteration
+(default2), then automatically fits each frame independently. Temporal fields
+remain; independent fields append _independent. Both coefficients and fit/
+sigma diagnostics are saved. No shape prior or inherited robust weights.
+
+Both methods take sensor mappings and pointing_correction=True to apply one
+shared metadata repair to WIC/SI12/SI13 before fitting. read_idl with
+pointing_metadata=True retains raw native geometry and precise timestamps.
+Public correct_pointing supports clock_phase(default) and position-only modes,
+preserving camera alignments/counts/variance and recomputing both geographic
+and historical magnetic coordinates. Gaps and unsupported endpoints do not
+extrapolate. Correct complete metadata before filtering science/hemisphere.
+
+127 full-package tests pass. Native complete85 fits and complete968 joint
+correction+2D fits pass all sensors,1446 independent fits total; both stages
+round-trip. Shared436km anomaly repaired in all three. Complete85 metadata
+check covers masked-WIC/valid-SI shared state. Built wheel includes current
+modules and checksum-verified original magnetic lookup. Validation products:
+figures/validation/2d_shared_pointing_20261019 (ignored). README and
+[[2D Background and Shared Metadata Pointing]] own usage/settings/limits,
+including the small WIC archived-reference-ridge difference. Old optional
+prior/initialization experiments remain disabled; unrelated work is preserved.
+
+Next: icBuilder production integration. No pipeline writer or external corpus
+was changed, no commit/push/deployment performed.
+
+## Portfolio impact
+
+- Central update needed: No
+- Changes: None
+- Sync summary: FUVPY implementation requested by the icBuilder investigation
+  is verified. Existing1D remains; new2D and joint metadata correction are
+  ready for the separate icBuilder integration step. No priority/deadline change.
+
+## Earlier change: second-fit sigma estimate, then freeze
+
+`dgsigma_freeze_iteration=2` reestimates the pooled residual relation after
+the second weighted fit, using incoming Tukey*population² statistics, then
+freezes the second sigma map. A third solve must consume it. Default1 remains
+unchanged; conflict with supplied coefficients is explicit. Stored[a,b] are
+from the final estimate. Tukey weights continue updating. 75 focused background
+tests pass, including unchanged defaults and loose-tolerance following-solve use.
+
+icBuilder recalibrates the full312-frame orbit968, confirming exact cached
+first sigma and final field equal to estimate2. Sigma at background1000
+changes665→355. Independent repaired292 comparison keeps denser knots, input
+support, variance/population weights and actual ridge fixed; original four
+fields reproduce exactly. All fits converge in4 solves. Result is modest,
+smaller than the manual quiet-scale trial, and dayside/edge artifacts remain.
+Only[a,b] pass into the frame fit; no prior shape or inherited weights.
+No production default or richer spatial model is selected. icBuilder owns
+the private products and discussion of separate SZA/DZA plus azimuth factors.
+Portfolio impact: Central update needed: No.
+
+## Earlier change: initial robust objective weights
+
+`initial_robust_weights` accepts a same-shaped [0,1] field for a single-date
+fit with supplied sigma. Only the first solve uses it; every valid fitted
+pixel, including initial zeros, gets a fresh Tukey update afterwards. An extra
+all-ones normal accumulation retains the ordinary damping scale. Shape prior
+and explicit initialization cannot be active together. 67 focused tests pass;
+all-ones outputs are identical, and mistakenly rejected quiet pixels recover.
+
+icBuilder's user rejects the shape constraint as returning the fit to the
+faulty orbit background and accepts frame292 position repair. Its new
+`compare_background_initial_weights.py` compares fourteen frames under fixed
+geometry/sigma/damping, with all-ones, actual orbit and recomputed-reference
+starting weights. All42 fits converge; real final solutions change little.
+Seeding helps the first292 solve, but subsequent reweighting mostly erases
+that benefit. Initial zeros recover; permanently frozen support is not the
+cause here. The unresolved issue is auroral contamination during updates.
+No further rejection method or production default is selected.
+
+Portfolio impact: Central update needed: No. icBuilder owns scientific review.
+
+## Earlier change: independent frame shape regularization
+
+`backgroundmodel_BS` adds optional `background_prior` and
+`background_prior_strength` (zero off), restricted to one date with supplied
+sigma. Its fixed population/measurement-weighted prediction penalty is
+separate from fresh Tukey weights and empirical sigma. Numerical damping is
+centered on a feasible projected prior; monotonic-center failures share the
+existing fallback/flag path. All data weights may be zero, explicitly making
+the result dependent on the reference. Lambda is empirical regularization,
+not a learned background variance. Zero strength/default behavior is unchanged.
+
+`store_spatial_coefficients=True` saves per-frame base-then-directional
+amplitudes for evaluating the same orbit function at different geometry.
+59 focused tests pass, including exact default equivalence, the weighted
+penalty, cubic narrow support, prior-projection fallback and known-truth
+aurora/quiet-offset tests. Moderate broad aurora can still be absorbed;
+stronger constraints reduce that attenuation but also suppress real background
+corrections. No calibrated Bayesian interpretation is claimed.
+
+icBuilder `compare_background_prior.py` owns fourteen real-frame comparisons
+at strengths0.1/1/10 and the separate frozen frame292 position-only repair.
+The entire first-stage calibration reproduces exactly; all60 independent
+solves converge. Constraint limits large free-fit departures; strong shrinkage
+restores old artifacts. Position repair visibly reduces the frame292 dayside
+band. Auroral preservation and temporal behavior still require validation.
+No production default or strength selected.
+
+Portfolio impact: Central update needed: No. This is an opt-in diagnostic.
+
+## Earlier change: reusable empirical sigma relationship
+
+`backgroundmodel_BS` adds opt-in `store_sigma_model=True` and
+`sigma_model_coefficients=[a,b]`. The former stores the estimated empirical
+sigma²=a*background²+b coefficients in dgmodel attributes; the latter skips
+the binned estimate and evaluates the supplied relationship at each current
+IRLS prediction. Robust weights start fresh, and ordinary measurement
+variance and solver damping remain separate. No coefficient/shape prior or
+frame-independence behavior is implied by passing sigma alone: the caller
+must fit one date per call for independent frame models.
+
+`tests/test_background_shared_sigma.py` and six related background suites
+plus the monotonic suite pass (43 tests). Exact default/stored-fit equivalence and a three-level
+synthetic background with injected aurora pass; NetCDF retains the two
+coefficients. Existing five-argument noise-helper calls remain unchanged
+unless coefficient storage is explicitly requested.
+
+The icBuilder driver `scripts/debugging/compare_independent_background.py`
+owns full-orbit calibration, original-metadata per-frame calls and comparison
+plots. Eight 0968 real-image preview fits converge with flag1; visual results
+are mixed, especially the known position-error frame292. Full 0968 export
+is left to the user, reusing the cached first fit. No defaults or production
+policy changed. See icBuilder project memory for trial results.
+
+Portfolio impact: Central update needed: No. This is an opt-in diagnostic
+capability; scientific adoption is unresolved.
 
 ## Obsolete branch reconciliation
 
