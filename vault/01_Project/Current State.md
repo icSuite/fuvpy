@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-10-19
 Branch: `background_model_asymmetry`
-Status: original1D preserved; separate2D and shared metadata pointing implemented; pipeline integration pending
+Status: original1D preserved; native2D integrated; corpus pointing fixes tested locally
 
 ## Latest: separate2D and joint metadata correction implemented
 
@@ -23,7 +23,29 @@ geometry on native grids. No image fitting; counts/variance/alignments retained.
 Full85 model comparisons and full968 shared-correction+2D fits pass all sensors;
 metadata85 also passes. Wheel/source/data packaging checks pass. Details and
 local evidence are owned by [[2D Background and Shared Metadata Pointing]].
-The icBuilder pipeline has not been switched. Next: pipeline integration.
+icBuilder now uses these methods in a separate original-style native writer.
+The full server corpus exposes metadata cases absent from local85/86/261/968:
+SI12/197 has two entirely unmapped DZA frames; WIC/197 and WIC/SI13/365 repeat
+SPIN at different increasing times. WIC and an unmapped SI12 record at almost
+the same time also have different counters. At the audit loading/validation
+rejected whole sequences, and correct_pointing used SPIN for reference association,
+segmentation and phase. The user approved skipping the two unmapped SI12
+files, retaining repeated-counter frames and matching cameras by time.
+Implemented skip_unmapped=False loader opt-in (enabled by icBuilder's2D
+writer), per-file warnings/recorded exclusions, integer-only SPIN validation
+and nearest precise WIC time association. Existing WIC counter/time-break
+segmentation is retained; short segments keep original pointing and remain
+eligible for background fitting. Partial/inconsistent geometry still raises.
+138 package tests pass, including counter/segment and loader regressions;
+the original1D numerical fixture still passes. Actual197/365 products require
+a server rerun because those raw files remain remote. The algorithm note owns
+exact evidence and limits.
+
+Complete85/968 metadata results are bitwise identical to the committed
+corrector across all three cameras, including both shared position outliers.
+The native2D full85 pipeline also exactly preserves all70 saved data fields
+per sensor. Reports are linked from the algorithm note;197/365 remain to
+verify on the server.
 
 ## Earlier opt-in: reestimate sigma after the second fit
 

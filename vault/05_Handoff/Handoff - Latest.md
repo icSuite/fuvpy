@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-10-19
 Branch: `background_model_asymmetry`
-Checkpoint: separate2D and joint metadata correction implemented; pipeline integration next
+Checkpoint: native2D integration and corpus metadata fixes; server verification pending
 
 ## Latest implementation: preserve1D, add2D and shared pointing
 
@@ -32,8 +32,31 @@ figures/validation/2d_shared_pointing_20261019 (ignored). README and
 including the small WIC archived-reference-ridge difference. Old optional
 prior/initialization experiments remain disabled; unrelated work is preserved.
 
-Next: icBuilder production integration. No pipeline writer or external corpus
-was changed, no commit/push/deployment performed.
+The implementation checkpoint itself changed no pipeline writer/corpus.
+icBuilder has since integrated this API in its original-style native writer.
+Server diagnostic output now shows unresolved corpus limits: SI12/197 files
+s1220002032117.idl and s1220002032119.idl have no stored/reconstructed DZA;
+WIC/197 and WIC/SI13/365 repeat SPIN while timestamps increase. At21:19:33
+WIC has22806 and an unmapped SI12 record22913,48ms apart. Current strict
+validation and SPIN-based reference lookup therefore required revision.
+The user approved file exclusions, retaining repeated-counter frames and
+time-based association. read_idl now offers skip_unmapped=False; the2D writer
+enables it to skip only wholly missing stored/reconstructed DZA, warn each
+filename and preserve a skipped_unmapped_files attribute. Other geometry
+errors remain strict. correct_pointing accepts repeated/decreasing integer
+counters, associates by nearest precise WIC time and retains existing
+counter/time-gap segments. Equidistant/unsupported matches keep original
+pointing. Segmentation affects only pointing, not the temporal background.
+138 package tests pass, including eleven new cases for these metadata
+conditions and the unchanged1D numerical fixture. The algorithm note owns
+details. Actual197/365 raw files remain remote; server verification is next.
+
+Complete raw85/968 metadata regressions against the committed corrector show
+every data variable unchanged across all six streams, including the shared
+outlier repairs. A full native85 rerun also matches all70 saved fields per
+sensor exactly, retaining122/197/195 science frames and success statuses.
+Reports: figures/validation/pointing_counter_time_20261019 and icBuilder
+figures/debugging/pointing_counter_time_20261019. Update both repos together.
 
 ## Portfolio impact
 
@@ -41,7 +64,9 @@ was changed, no commit/push/deployment performed.
 - Changes: None
 - Sync summary: FUVPY implementation requested by the icBuilder investigation
   is verified. Existing1D remains; new2D and joint metadata correction are
-  ready for the separate icBuilder integration step. No priority/deadline change.
+  integrated in the icBuilder native writer. The reported metadata conditions
+  now have locally tested handling; real197/365 verification remains on the
+  server. No priority/deadline change.
 
 ## Earlier change: second-fit sigma estimate, then freeze
 

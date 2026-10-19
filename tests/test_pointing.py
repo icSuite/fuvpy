@@ -129,6 +129,60 @@ def test_gaps_do_not_join_short_segments_or_extrapolate_position_repairs():
         np.testing.assert_array_equal(data.sza, source[sensor].sza)
 
 
+def test_camera_time_matching_is_independent_of_repeated_or_offset_si_counters():
+    source = _synthetic_cameras(phase_noise=True)
+    expected = correct_pointing(source)
+    source['SI12'].SPIN.values[:] += 107
+    source['SI13'].SPIN.values[8:] -= 1
+    result = correct_pointing(source)
+    for sensor, data in result.items():
+        for name in ['pointing_filter_supported', 'pointing_position_outlier', 'pointing_phase_delta', 'O_GCI', 'glat', 'sza', 'mlat']:
+            np.testing.assert_array_equal(data[name], expected[sensor][name])
+        np.testing.assert_array_equal(data.SPIN, source[sensor].SPIN)
+
+
+@pytest.mark.parametrize('counter_jump', [-1, -1000, 5])
+def test_wic_counter_breaks_fit_each_side_separately_without_dropping_frames(counter_jump):
+    source = _synthetic_cameras(frames=35, phase_noise=True)
+    boundary = 13
+    for data in source.values():
+        data.SPIN.values[boundary:] += counter_jump
+        data.SPIN_PHASE.values[boundary:] += 40
+    result = correct_pointing(source)
+    for section in [slice(0, boundary), slice(boundary, None)]:
+        separate = correct_pointing({sensor: data.isel(date=section) for sensor, data in source.items()})
+        for sensor, data in separate.items():
+            joined = result[sensor].isel(date=section)
+            np.testing.assert_array_equal(joined.pointing_filter_supported, data.pointing_filter_supported)
+            np.testing.assert_array_equal(joined.pointing_position_outlier, data.pointing_position_outlier)
+            np.testing.assert_allclose(joined.pointing_phase_delta, data.pointing_phase_delta, atol=1e-10, rtol=0)
+            np.testing.assert_allclose(joined.O_GCI, data.O_GCI, atol=1e-9, rtol=0)
+    for sensor, data in result.items():
+        assert data.sizes['date'] == 35 and data.pointing_position_outlier.values[17]
+        np.testing.assert_array_equal(data.SPIN, source[sensor].SPIN)
+        np.testing.assert_array_equal(data.img, source[sensor].img)
+
+
+def test_repeated_wic_counter_short_segments_keep_original_pointing():
+    source = _synthetic_cameras(phase_noise=True)
+    source['WIC'].SPIN.values[8:] -= 1
+    result = correct_pointing(source)
+    for sensor, data in result.items():
+        assert not data.pointing_filter_supported.any()
+        for name in source[sensor].data_vars:
+            np.testing.assert_array_equal(data[name], source[sensor][name])
+
+
+def test_equidistant_wic_time_match_is_left_uncorrected():
+    source = _synthetic_cameras(phase_noise=True)
+    time = source['WIC'].pointing_time.values
+    source['SI12'].pointing_time.values[7] = time[6]+(time[7]-time[6])//2
+    data = correct_pointing(source)['SI12']
+    assert not data.pointing_filter_supported.values[7]
+    np.testing.assert_array_equal(data.O_GCI.values[7], source['SI12'].O_GCI.values[7])
+    np.testing.assert_array_equal(data.sza.values[7], source['SI12'].sza.values[7])
+
+
 def test_pointing_rejects_missing_cameras_invalid_times_and_repeated_correction():
     source = _synthetic_cameras(spike=False)
     with pytest.raises(ValueError, match='WIC, SI12 and SI13'):

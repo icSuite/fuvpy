@@ -1,8 +1,8 @@
 # 2D Background and Shared Metadata Pointing
 
 Last reviewed: 2026-10-19
-Status: implemented and verified; icBuilder pipeline integration pending.
-Repository: background_model_asymmetry at65603e0 plus uncommitted changes.
+Status: background methods and corpus metadata guards tested locally; server rerun pending.
+Repository: background_model_asymmetry at46f31e9.
 
 ## Public methods and compatibility
 
@@ -63,8 +63,12 @@ an eleven-frame robust leave-centre-out cubic, threshold max(20km,median+
 10MAD-sigma), and local isolation test. Default method=clock_phase also smooths
 unwrap(phase)+360*SPIN with a local quadratic; method=position omits smoothing.
 Every sensor receives the same orbit solution evaluated at its own precise
-time and matching spin; camera alignments stay fixed. Missing spins, short
-segments, gaps and unsupported reference endpoints are not extrapolated.
+time, associated with the nearest WIC timestamp independently of SPIN.
+Equidistant matches are left unchanged. Camera alignments stay fixed. WIC
+counter transitions other than+1 and time gaps>1.5median cadence retain the
+existing segmentation rule. Segments shorter than the eleven-frame window,
+gaps and unsupported reference endpoints are not extrapolated. These breaks
+affect pointing smoothing only, not the temporal background spline.
 
 Native rays are recovered from saved coordinates and observer metadata. A
 full3D Earth-frame rotation is constrained by historical SUN3, stored SZA and
@@ -83,9 +87,53 @@ correction vectors, support and baseline errors are retained. Reapplication
 is rejected. This is metadata consistency repair, not independent attitude
 validation or an image/limb-driven registration.
 
+## Corpus metadata cases: server orbits197 and365
+
+The user ran icBuilder's read-only diagnostic on the full server corpus.
+SI12/197 `s1220002032117.idl` and `s1220002032119.idl` have zero valid stored
+and reconstructed DZA pixels. The original strict loader raises for either
+frame before returning a sequence, preventing fitting all three sensors.
+The user approved excluding these files while retaining the rest of the orbit.
+New read_idl option skip_unmapped=True skips only files with neither stored
+nor reconstructed valid DZA. It warns with each filename and records a
+newline-separated skipped_unmapped_files attribute; calibration arrays remain
+aligned. Partial/inconsistent geometry still raises. If every file is
+excluded, a clear error reports that no frames remain. DefaultFalse preserves
+strict1D loading; icBuilder's2D native writer explicitly enables this option.
+
+WIC/197 repeats22503 at08:25/08:27,22536 at08:28/08:29, and22806 at
+21:19/21:20/21:21. WIC and SI13/365 repeat54609 at12:25/12:27. Times increase
+and there is no evidence from counter repetition alone of duplicate images.
+At21:19:33 on2000-07-21, WIC has22806 while SI12 has22913,48ms apart; the
+SI12 frame is one of the unmapped records, so its metadata are not independently
+validated. These records nevertheless invalidate an unconditional common
+unique-SPIN assumption. The former corrector both validated strict increase
+and looked up reference frames by SPIN. The user approved retaining repeated
+counter frames and time-based camera association. correct_pointing now
+requires finite integer counters without strict increase, finds the nearest
+precise WIC time, and evaluates corrections only inside that supported WIC
+segment. Original counters and all input frames remain. Existing counter
+segmentation and clock-aware phase construction are unchanged.
+
+138 package tests pass, including offset/repeated SI counters, repeated,
+reset and jumping WIC counters, equality to separately fitted segments,
+unchanged unsupported frames, equidistant timestamp rejection, strict loader
+compatibility, individual/all-unmapped cases and retained geometry errors.
+Server raw197/365 files are not local; actual corrected products still require
+a server rerun. icBuilder's [[IMAGE IDL Pointing Metadata]] owns exact files.
+
+Complete local85 and968 metadata were compared against the committed
+pre-fix corrector. Every data variable is bitwise unchanged for all six
+sensor/orbit streams (236/226/235 and328/326/326 input frames). The known
+85 and968 outliers remain repaired in all cameras. Ignored report:
+figures/validation/pointing_counter_time_20261019/complete_orbit_comparison.json.
+The native2D writer also completed full85 with all70 saved data variables
+per sensor exactly equal to its prior output,122/197/195 science frames and
+status1 for all three cameras. icBuilder owns that pipeline evidence.
+
 ## Verification and integration boundary
 
-127 package tests pass, including frozen1D defaults, freeze1/2/3 consumption,
+138 package tests pass, including frozen1D defaults, freeze1/2/3 consumption,
 known-truth surfaces and abrupt backgrounds with aurora, native SI128 shapes,
 joint correction in both methods, input preservation, failure paths and NetCDF.
 The built wheel includes both modules and checksum-verified magnetic data.
@@ -105,6 +153,8 @@ fully science-masked SPIN3722 while SI retains valid pixels.
 Ignored local evidence: figures/validation/2d_shared_pointing_20261019 contains
 six native comparison files, real_orbit_regression.json,
 joint_pointing_fit_regression.json, implementation_checks.json and the wheel.
-No icBuilder production entry point or external corpus was overwritten.
-Next: integrate the selected outputs into icBuilder after reviewing its field
-selection, pointing-before-quality order and dual-result serialization.
+The original implementation checkpoint did not change icBuilder entry points.
+icBuilder has since integrated this API into an original-style native writer,
+retaining its CLI/output/status behavior. The reported server metadata cases
+now have local regression coverage; actual197/365 processing remains to
+verify on the server. Downstream Product1 field selection remains separate.

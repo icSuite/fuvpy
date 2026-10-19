@@ -7,6 +7,7 @@ Created on Thu Sep 29 20:46:03 2022
 """
 
 import os
+import warnings
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -33,7 +34,7 @@ DEFAULT_FRAME_QUALITY_THRESHOLDS = {
 }
 
 
-def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True, measurement_variance=False, poisson_offset=0.0, wic_variance_model='reference', viewing_geometry=False, frame_quality_thresholds=None, pointing_metadata=False):
+def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True, measurement_variance=False, poisson_offset=0.0, wic_variance_model='reference', viewing_geometry=False, frame_quality_thresholds=None, pointing_metadata=False, skip_unmapped=False):
     '''
     Load FUV images into a xarray.Dataset
 
@@ -76,6 +77,11 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
         existing output fields unchanged.
         Fit both background methods to a sensor mapping with
         pointing_correction=True to enable the shared repair.
+    skip_unmapped : bool, optional
+        During viewing-geometry validation, skip a file only when both stored
+        and reconstructed DZA have no valid pixels. Warn with its filename
+        and retain the excluded filenames in dataset attributes. Default
+        False preserves strict loading. Geometry disagreements still raise.
     frame_quality_thresholds : dict, optional
         Overrides for ``minimum_mapped_fraction``,
         ``minimum_relative_spread``,
@@ -129,6 +135,7 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
 
     filenames.sort()
     imgs = []
+    skipped_unmapped = []
     calibration_flags = []
     airglow_scales = []
     for i in range(len(filenames)):
@@ -196,6 +203,12 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
 
             valid_dza = np.isfinite(geometry['dza']) & np.isfinite(img['dza'].values) & (img['dza'].values >= 0)
             if not np.any(valid_dza):
+                stored_valid = np.isfinite(img['dza'].values) & (img['dza'].values >= 0)
+                reconstructed_valid = np.isfinite(geometry['dza']) & (geometry['dza'] >= 0)
+                if skip_unmapped and not np.any(stored_valid) and not np.any(reconstructed_valid):
+                    skipped_unmapped.append(str(filenames[i]))
+                    warnings.warn(f"Skipping unmapped {inst_id} frame {filenames[i]}: no valid stored or reconstructed DZA pixels", RuntimeWarning, stacklevel=2)
+                    continue
                 raise ValueError("Viewing geometry could not be validated because the frame contains no valid DZA pixels")
 
             maximum_dza_error = np.max(np.abs(geometry['dza'][valid_dza] - img['dza'].values[valid_dza]))
@@ -227,8 +240,12 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
             calibration_flags.append(int(imageinfo['calibration_flag'][0]))
             airglow_scales.append(np.asarray(imageinfo['airglow_scale'][0], dtype=float))
 
+    if not imgs:
+        raise ValueError("No frames remain after excluding files with no stored or reconstructed DZA pixels")
     imgs = xr.concat(imgs, dim='date')
     imgs = imgs.assign({'id':  imageinfo['inst_id'][0].strip().decode('utf8')})
+    if skipped_unmapped:
+        imgs.attrs['skipped_unmapped_files'] = '\n'.join(skipped_unmapped)
     imgs = _add_frame_quality(imgs, frame_quality_thresholds)
     if pointing_metadata:
         imgs.attrs['pointing_dzalim'] = float(dzalim)

@@ -175,9 +175,17 @@ packaged epoch1997 Apex table preserves FUVVIEW3's coordinate convention.
 Counts and detector variance remain unchanged. Corrected science coordinates
 retain the intersection of original mapping and corrected visibility/DZA
 support. Diagnostics record original spacecraft state, coordinate hashes,
-position/phase corrections and unsupported intervals. Missing spins, short
+position/phase corrections and unsupported intervals. Cameras associate by
+nearest millisecond observation time rather than equal SPIN counters. WIC
+counter discontinuities and time gaps separate smoothing segments; short
 segments and reference-time boundaries are not extrapolated. This repairs
 metadata consistency; it is not an independent attitude determination.
+
+For corpus processing, ``read_idl(..., pointing_metadata=True,
+skip_unmapped=True)`` excludes files with neither stored nor reconstructed
+valid DZA pixels. Each excluded filename is warned and retained in the
+``skipped_unmapped_files`` attribute. Other geometry validation errors still
+raise. The default remains strict and does not skip files.
 
 Use complete-orbit metadata before selecting science frames. The public
 ``fuv.correct_pointing(sensors, ...)`` returns corrected copies separately

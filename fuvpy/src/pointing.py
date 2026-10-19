@@ -192,8 +192,8 @@ def _validate_images(images):
             if not np.all(np.isfinite(data[name].values)):
                 raise ValueError(f'{sensor} {name} metadata must be finite')
         spin = data.SPIN.values
-        if np.any(spin != np.rint(spin)) or np.any(np.diff(spin) <= 0):
-            raise ValueError(f'{sensor} SPIN must contain strictly increasing integers')
+        if np.any(spin != np.rint(spin)):
+            raise ValueError(f'{sensor} SPIN must contain integers')
         norm = np.linalg.norm(data.A_GCI3.values, axis=1)
         if np.any(np.abs(norm - 1) > 1e-3):
             raise ValueError(f'{sensor} A_GCI3 must contain unit spin-axis vectors')
@@ -259,8 +259,11 @@ def correct_pointing(images, method='clock_phase', window=11, minimum_position_o
     The default ``'clock_phase'`` also smooths clock-aware spin phase with a
     local quadratic. WIC is the shared reference; camera alignments are fixed.
     The robust leave-centre-out cubic position fit and eleven-frame window
-    reproduce the reviewed icBuilder metadata trial. Short segments, absent
-    spins and times outside a supported WIC segment receive no extrapolation.
+    reproduce the reviewed icBuilder metadata trial. WIC time gaps and counter
+    discontinuities separate smoothing segments. Camera frames associate with
+    the nearest precise WIC time, independently of their SPIN counters.
+    Equidistant matches, short segments and times outside a supported WIC
+    segment receive no correction or extrapolation.
 
     Use ``read_idl(..., pointing_metadata=True)`` for every sensor. Counts and
     variances are unchanged. Geographic, legacy1997 Apex and background fields
@@ -278,7 +281,6 @@ def correct_pointing(images, method='clock_phase', window=11, minimum_position_o
         raise ValueError('minimum_position_outlier_km must be finite and positive')
     _validate_images(images)
     reference = _reference_corrections(images['WIC'], window, minimum_position_outlier_km)
-    spin_index = {int(spin): i for i, spin in enumerate(reference['spin'])}
     epoch = images['WIC'].pointing_time.values[0].astype('datetime64[ns]').astype(np.int64)
     output = {}
     for sensor, original in images.items():
@@ -292,11 +294,14 @@ def correct_pointing(images, method='clock_phase', window=11, minimum_position_o
         magnetic_error = np.full(count, np.nan)
         geometry_updated = np.zeros(count, dtype=bool)
         for index, spin in enumerate(data.SPIN.values):
-            if int(spin) not in spin_index:
-                continue
-            ri = spin_index[int(spin)]
-            group = np.flatnonzero(reference['segment'] == reference['segment'][ri])
             t = (data.pointing_time.values[index].astype('datetime64[ns]').astype(np.int64) - epoch)/1e9
+            right = np.searchsorted(reference['time'], t)
+            candidates = np.arange(max(0, right - 1), min(len(reference['time']), right + 1))
+            distances = np.abs(reference['time'][candidates] - t)
+            if len(candidates) == 2 and distances[0] == distances[1]:
+                continue
+            ri = int(candidates[np.argmin(distances)])
+            group = np.flatnonzero(reference['segment'] == reference['segment'][ri])
             if not reference['supported'][ri] or t < reference['time'][group[0]] or t > reference['time'][group[-1]]:
                 continue
             supported[index] = True
@@ -340,6 +345,7 @@ def correct_pointing(images, method='clock_phase', window=11, minimum_position_o
         data['pointing_baseline_magnetic_error'] = (['date'], magnetic_error)
         data.pointing_position_delta.attrs = {'units': 'km', 'long_name': 'Shared metadata spacecraft position correction'}
         data.pointing_phase_delta.attrs = {'units': 'deg', 'long_name': 'Shared clock-aware phase correction'}
+        data.attrs['pointing_reference_matching'] = 'Nearest precise observation time within a supported WIC segment; equidistant matches skipped; no extrapolation'
         data.pointing_baseline_angle_error.attrs = {'units': 'deg', 'long_name': 'Maximum unchanged SZA/DZA reconstruction error'}
         data.pointing_baseline_magnetic_error.attrs = {'units': 'deg', 'long_name': 'Maximum unchanged magnetic unit-vector direction error'}
         for name in GEOGRAPHIC_FIELDS + MAGNETIC_FIELDS:
