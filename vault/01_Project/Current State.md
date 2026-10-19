@@ -47,6 +47,11 @@ The native2D full85 pipeline also exactly preserves all70 saved data fields
 per sensor. Reports are linked from the algorithm note;197/365 remain to
 verify on the server.
 
+The loader now explicitly uses xr.concat(..., data_vars='all'), preserving
+existing concatenation semantics while removing the xarray data_vars-default
+FutureWarning. All29 focused loader/geometry/pointing tests pass with
+FutureWarning treated as an error.
+
 ## Earlier opt-in: reestimate sigma after the second fit
 
 `dgsigma_freeze_iteration=2` estimates pooled sigma after fit1 and again after

@@ -242,7 +242,7 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
 
     if not imgs:
         raise ValueError("No frames remain after excluding files with no stored or reconstructed DZA pixels")
-    imgs = xr.concat(imgs, dim='date')
+    imgs = xr.concat(imgs, dim='date', data_vars='all')
     imgs = imgs.assign({'id':  imageinfo['inst_id'][0].strip().decode('utf8')})
     if skipped_unmapped:
         imgs.attrs['skipped_unmapped_files'] = '\n'.join(skipped_unmapped)

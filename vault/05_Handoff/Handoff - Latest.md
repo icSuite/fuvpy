@@ -58,6 +58,11 @@ sensor exactly, retaining122/197/195 science frames and success statuses.
 Reports: figures/validation/pointing_counter_time_20261019 and icBuilder
 figures/debugging/pointing_counter_time_20261019. Update both repos together.
 
+Warning follow-up: read_idl explicitly sets data_vars='all' in xr.concat,
+preserving its current behavior across xarray's announced default change.
+29 focused loader/geometry/pointing tests pass with FutureWarning promoted
+to an error. This is included in the same load.py and project-memory files.
+
 ## Portfolio impact
 
 - Central update needed: No
