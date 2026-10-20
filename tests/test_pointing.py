@@ -10,7 +10,7 @@ from scipy.spatial.transform import Rotation
 import xarray as xr
 
 from fuvpy.src.load import read_idl
-from fuvpy.src.pointing import _ellipsoid, _historical_sun, _magnetic, _native_geometry, correct_pointing
+from fuvpy.src.pointing import _ellipsoid, _historical_sun, _magnetic, _native_geometry, _robust_wic_state, _state_settings, correct_pointing
 from fuvpy.src.viewing_geometry import calculate_viewing_geometry
 from fuvpy.utils.sunlight import subsol
 
@@ -92,6 +92,146 @@ def test_clock_phase_correction_is_shared_and_does_not_modify_inputs():
         assert not supported[-1]
         np.testing.assert_array_equal(data.glat.values[-1], original[sensor].glat.values[-1])
         np.testing.assert_array_equal(data.A_GCI3, original[sensor].A_GCI3)
+
+
+@pytest.mark.parametrize('sensor', ['WIC', 'SI12', 'SI13'])
+def test_historical_magnetic_mismatch_does_not_block_shared_pointing(sensor):
+    source = _synthetic_cameras()
+    expected = correct_pointing(source, method='position')
+    # A disagreement much larger than the former 0.001deg threshold must not
+    # change the correction determined from geographic/spacecraft metadata.
+    source[sensor].mlat.values[7] += .1
+    result = correct_pointing(source, method='position')
+    for name, data in result.items():
+        assert data.pointing_position_outlier.values[7]
+        for field in ['O_GCI', 'pointing_phase_delta', 'glat', 'glon', 'sza', 'dza', 'solar_view_sine_factor', 'mlat', 'mlon', 'mlt', 'img', 'img_variance']:
+            np.testing.assert_array_equal(data[field], expected[name][field])
+        assert 'pointing_baseline_magnetic_error' not in data
+
+
+def test_unmapped_wic_frames_with_bad_axes_do_not_discard_valid_si_frames():
+    source = _synthetic_cameras(frames=17, phase_noise=True)
+    wic = source['WIC']
+    wic['pointing_DZA'] = wic.dza.copy(deep=True)
+    wic.pointing_DZA.values[:2] = 100
+    wic.dza.values[:2] = np.nan
+    wic.A_GCI3.values[:2] = .7247730218805373
+    wic.SPIN.values[:2] = 23749
+    wic.SPIN_PHASE.values[:2] = 10357703229.39437
+
+    expected = correct_pointing({**source, 'WIC': wic.isel(date=slice(2, None))})
+    result = correct_pointing(source)
+
+    for sensor in ['SI12', 'SI13']:
+        for name in ['pointing_filter_supported', 'pointing_phase_delta', 'glat', 'sza', 'O_GCI']:
+            np.testing.assert_array_equal(result[sensor][name], expected[sensor][name])
+        assert not result[sensor].pointing_filter_supported.values[:2].any()
+        assert np.isfinite(result[sensor].dza.values[:2]).any()
+    assert not result['WIC'].pointing_filter_supported.values[:2].any()
+    np.testing.assert_array_equal(result['WIC'].A_GCI3.values[:2], wic.A_GCI3.values[:2])
+    np.testing.assert_array_equal(result['WIC'].SPIN_PHASE.values[:2], wic.SPIN_PHASE.values[:2])
+    np.testing.assert_array_equal(result['WIC'].pointing_phase_delta.values[2:], expected['WIC'].pointing_phase_delta.values)
+
+
+def test_bad_spin_axis_with_visible_rays_is_rejected():
+    source = _synthetic_cameras()
+    source['WIC'].A_GCI3.values[0] = .7247730218805373
+    with pytest.raises(ValueError, match='unit spin-axis vectors in frames with visible rays'):
+        correct_pointing(source)
+
+
+def test_selected_camera_frames_match_full_correction_with_complete_wic_reference():
+    source = _synthetic_cameras(frames=17, phase_noise=True)
+    complete = correct_pointing(source)
+    indices = {'WIC': [i for i in range(17) if i not in (0, 8, 16)], 'SI12': np.arange(2, 15), 'SI13': np.arange(1, 16, 2)}
+    selected = {sensor: data.isel(date=indices[sensor]) for sensor, data in source.items()}
+    result = correct_pointing(selected, reference_wic=source['WIC'])
+
+    for sensor, data in result.items():
+        expected = complete[sensor].isel(date=indices[sensor])
+        for name in ['pointing_filter_supported', 'pointing_position_outlier', 'pointing_position_delta', 'pointing_phase_delta', 'pointing_geometry_updated', 'O_GCI', 'SPIN_PHASE', 'glat', 'sza', 'dza', 'img']:
+            np.testing.assert_array_equal(data[name], expected[name])
+    assert result['SI12'].pointing_position_outlier.values[6]
+
+
+def test_rejected_wic_image_can_be_invalid_reference_while_si_remains_selected():
+    source = _synthetic_cameras(phase_noise=True)
+    source['WIC'].A_GCI3.values[0] = .7247730218805373
+    selected = {'WIC': source['WIC'].isel(date=slice(1, None)), 'SI12': source['SI12'], 'SI13': source['SI13'].isel(date=slice(0, 0))}
+    result = correct_pointing(selected, reference_wic=source['WIC'])
+    assert result['WIC'].sizes['date'] == 14
+    assert result['SI13'].sizes['date'] == 0
+    assert not result['SI12'].pointing_filter_supported.values[0]
+    assert result['SI12'].pointing_filter_supported.values[2]
+
+
+def test_pointing_valid_flag_excludes_wic_reference_without_image_quality_filter():
+    source = _synthetic_cameras(frames=17, phase_noise=True)
+    source['WIC']['pointing_valid'] = ('date', np.ones(17, dtype=bool))
+    source['WIC'].pointing_valid.values[0] = False
+    selected = {'WIC': source['WIC'].isel(date=slice(1, None)), 'SI12': source['SI12'], 'SI13': source['SI13']}
+    actual = correct_pointing(selected, reference_wic=source['WIC'])
+    expected = correct_pointing(selected, reference_wic=source['WIC'].isel(date=slice(1, None)))
+    for sensor in ['WIC', 'SI12', 'SI13']:
+        np.testing.assert_array_equal(actual[sensor].pointing_phase_delta, expected[sensor].pointing_phase_delta)
+        np.testing.assert_array_equal(actual[sensor].pointing_filter_supported, expected[sensor].pointing_filter_supported)
+
+
+def test_robust_state_repairs_shared_position_axis_and_phase_outlier():
+    source = _synthetic_cameras(frames=21, spike=True, phase_noise=True)
+    source['WIC']['frame_quality'] = ('date', np.arange(21) % 3)
+    source['WIC'].A_GCI3.values[10] = [.03, -.02, 1]
+    source['WIC'].A_GCI3.values[10] /= np.linalg.norm(source['WIC'].A_GCI3.values[10])
+    source['WIC'].SPIN_PHASE.values[10] += 2
+
+    result = correct_pointing(source, method='robust_state')
+    expected_position = _synthetic_cameras(frames=21, spike=False)['WIC'].O_GCI.values[10]
+    for sensor, data in result.items():
+        assert np.all(data.pointing_status.values == 'supported')
+        np.testing.assert_array_equal(np.flatnonzero(data.pointing_reference_outlier.values), [10])
+        np.testing.assert_allclose(data.O_GCI.values[10], expected_position, atol=2)
+        assert data.pointing_axis_delta_angle.values[10] > 2
+        assert data.pointing_phase_delta.values[10] < -1.9
+        assert data.pointing_geometry_updated.values[10]
+        np.testing.assert_array_equal(data.img, source[sensor].img)
+        np.testing.assert_array_equal(data.img_variance, source[sensor].img_variance)
+    np.testing.assert_array_equal(result['WIC'].frame_quality, source['WIC'].frame_quality)
+
+
+def test_robust_state_separates_sustained_change_with_unresolved_transition():
+    wic = _synthetic_cameras(frames=25, spike=False)['WIC']
+    wic.O_GCI.values[12:] += [100, -50, 20]
+    wic.A_GCI3.values[12:] = [.02, 0, 1]
+    wic.A_GCI3.values[12:] /= np.linalg.norm(wic.A_GCI3.values[12:], axis=1, keepdims=True)
+    wic.SPIN_PHASE.values[12:] += 1
+
+    state = _robust_wic_state(wic, _state_settings(None))
+    assert np.all(state['unresolved'][9:15])
+    assert np.all(state['supported'][:9])
+    assert np.all(state['supported'][15:])
+    assert state['segment'][8] != state['segment'][15]
+
+
+def test_robust_state_uses_separate_invalid_metadata_status():
+    source = _synthetic_cameras(frames=15, spike=False)
+    for data in source.values():
+        data['pointing_valid'] = ('date', np.ones(15, dtype=bool))
+    source['SI12'].pointing_valid.values[7] = False
+    source['SI12'].A_GCI3.values[7] = np.nan
+    result = correct_pointing(source, method='robust_state')
+
+    assert result['SI12'].pointing_status.values[7] == 'invalid_metadata'
+    assert result['SI12'].pointing_status_reason.values[7] == 'invalid_metadata'
+    assert result['WIC'].pointing_status.values[7] == 'supported'
+    assert result['SI13'].pointing_status.values[7] == 'supported'
+
+
+def test_robust_state_missing_si_sensor_does_not_block_available_camera():
+    source = _synthetic_cameras(frames=15, spike=True)
+    result = correct_pointing({'SI12': source['SI12']}, method='robust_state', reference_wic=source['WIC'])
+    assert set(result) == {'SI12'}
+    assert np.all(result['SI12'].pointing_status.values == 'supported')
+    assert result['SI12'].pointing_reference_outlier.values[7]
 
 
 def test_shared_state_is_repaired_when_one_camera_has_no_science_pixels():
@@ -236,7 +376,6 @@ def test_real_shared_968_outlier_repairs_all_native_cameras():
             # Frozen accepted metadata prototype, not a value refit by this test.
             np.testing.assert_allclose(data.O_GCI.values[index], [11565.078542856842, 2566.268270118314, 32409.692656094223], atol=1e-8, rtol=0)
         assert data.pointing_baseline_angle_error.values[index] < 4e-5
-        assert data.pointing_baseline_magnetic_error.values[index] < 1e-3
         assert np.nanmax(np.abs(data.sza.values[index] - cameras[sensor].sza.values[index])) > .1
         assert np.all(np.isfinite(data.solar_view_sine_factor.values[index][np.isfinite(data.sza.values[index])]))
         np.testing.assert_array_equal(data.img, cameras[sensor].img)

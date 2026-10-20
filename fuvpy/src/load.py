@@ -34,6 +34,29 @@ DEFAULT_FRAME_QUALITY_THRESHOLDS = {
 }
 
 
+def _viewing_state_valid(img):
+    """Check the geometry fields needed to reconstruct this frame's rays."""
+    position = np.asarray(img.O_GCI.values[0], dtype=float)
+    latitude = float(img.LAT_CTR.values[0])
+    longitude = float(img.LON_CTR.values[0])
+    height = float(img.EMIS_HGT.values[0])
+    return (np.all(np.isfinite(position)) and np.linalg.norm(position) > 6378.136
+            and np.isfinite(latitude) and -90 <= latitude <= 90
+            and np.isfinite(longitude) and np.isfinite(height) and height >= 0)
+
+
+def _pointing_record_valid(img):
+    """Flag categorical metadata errors without judging image or time-series quality."""
+    axis = np.asarray(img.A_GCI3.values[0], dtype=float)
+    spin = float(img.SPIN.values[0])
+    phase = float(img.SPIN_PHASE.values[0])
+    alignment = [float(img[name].values[0]) for name in ['INST_AZIMUTH', 'INST_CO_ELEV', 'INST_ROLL']]
+    return bool(not np.isnat(img.pointing_time.values[0]) and _viewing_state_valid(img)
+                and np.all(np.isfinite(axis)) and abs(np.linalg.norm(axis) - 1) <= 1e-3
+                and np.isfinite(spin) and spin == np.rint(spin)
+                and np.isfinite(phase) and np.all(np.isfinite(alignment)))
+
+
 def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True, measurement_variance=False, poisson_offset=0.0, wic_variance_model='reference', viewing_geometry=False, frame_quality_thresholds=None, pointing_metadata=False, skip_unmapped=False):
     '''
     Load FUV images into a xarray.Dataset
@@ -79,9 +102,10 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
         pointing_correction=True to enable the shared repair.
     skip_unmapped : bool, optional
         During viewing-geometry validation, skip a file only when both stored
-        and reconstructed DZA have no valid pixels. Warn with its filename
-        and retain the excluded filenames in dataset attributes. Default
-        False preserves strict loading. Geometry disagreements still raise.
+        and reconstructed DZA have no valid pixels. With pointing_metadata,
+        retain such a frame as metadata-only when its pointing record is valid.
+        Files with unreadable TIME are skipped with a warning in this mode.
+        Default False preserves strict loading. Geometry disagreements raise.
     frame_quality_thresholds : dict, optional
         Overrides for ``minimum_mapped_fraction``,
         ``minimum_relative_spread``,
@@ -112,8 +136,11 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
     'hv_phos': Phosphor high voltage stored by FUVVIEW3
     'hv_mcp': Microchannel-plate high voltage stored by FUVVIEW3
     'bad': Bool of problematic pixels. True=good and False=bad
-    'frame_quality': Ordinal frame classification: 0 rejected, 1 usable, and
+    'frame_quality': Ordinal image classification: 0 rejected, 1 usable, and
                      2 science-ready
+    When ``pointing_metadata=True``:
+    'pointing_valid': Whether this frame has a usable pointing metadata record,
+                      independently of image quality and mapped pixel count
     'row_relative_spread': Relative signal spread within each detector row
     'median_row_relative_spread': Median relative spread across mapped rows
     'turn_on_reference_correlation': Image correlation with the preceding
@@ -136,6 +163,9 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
     filenames.sort()
     imgs = []
     skipped_unmapped = []
+    skipped_invalid_time = []
+    invalid_time_audit = []
+    metadata_only = []
     calibration_flags = []
     airglow_scales = []
     for i in range(len(filenames)):
@@ -154,7 +184,21 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
         'dza': (['row','col'],imageinfo['dza'][0]),
         'sza': (['row','col'],imageinfo['sza'][0])
         })
-        image_time = pd.to_datetime(_timestamp_idl(imageinfo['time'][0]))
+        try:
+            image_time = pd.to_datetime(_timestamp_idl(imageinfo['time'][0]))
+            if pointing_metadata:
+                stamp = imageinfo['time'][0]
+                milliseconds = float(stamp[1])
+                if not np.isfinite(milliseconds) or milliseconds != int(milliseconds) or not 0 <= milliseconds < 86400000:
+                    raise ValueError('invalid milliseconds in TIME')
+                exact_time = datetime.strptime(str(int(stamp[0])), '%Y%j') + timedelta(milliseconds=int(milliseconds))
+        except (KeyError, ValueError, TypeError, OverflowError) as error:
+            if pointing_metadata and skip_unmapped:
+                skipped_invalid_time.append(str(filenames[i]))
+                invalid_time_audit.append(f'{filenames[i]}\tpointing_valid=false\treason=invalid_time\tdetail={error}')
+                warnings.warn(f"Skipping {inst_id} frame {filenames[i]}: invalid TIME ({error})", RuntimeWarning, stacklevel=2)
+                continue
+            raise ValueError(f"Invalid TIME in {filenames[i]}: {error}") from error
         img = img.expand_dims(date=[image_time])
         img['hv_phos'] = (['date'], [float(imageinfo['hv_phos'][0])])
         img['hv_mcp'] = (['date'], [float(imageinfo['hv_mcp'][0])])
@@ -162,17 +206,20 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
         if pointing_metadata:
             vectors = ['O_GCI', 'A_GCI3', 'SC_SV']
             scalars = ['SPIN_PHASE', 'SPIN', 'INST_AZIMUTH', 'INST_CO_ELEV', 'INST_ROLL', 'LAT_CTR', 'LON_CTR', 'EMIS_HGT']
-            available = {name.upper() for name in imageinfo.dtype.names}
-            missing = [name for name in vectors+scalars+['TIME'] if name not in available]
-            if missing:
-                raise ValueError('Pointing metadata requires FUVVIEW3 fields: '+', '.join(missing))
             for name in vectors:
-                img[name] = (['date', 'pointing_xyz'], np.asarray(imageinfo[name.lower()][0], dtype=float).reshape(1, 3))
+                try:
+                    value = np.asarray(imageinfo[name.lower()][0], dtype=float).reshape(1, 3)
+                except (KeyError, ValueError, TypeError, IndexError):
+                    value = np.full((1, 3), np.nan)
+                img[name] = (['date', 'pointing_xyz'], value)
             for name in scalars:
-                img[name] = ('date', [int(imageinfo[name.lower()][0]) if name == 'SPIN' else float(imageinfo[name.lower()][0])])
-            stamp = imageinfo['time'][0]
-            exact_time = datetime.strptime(str(int(stamp[0])), '%Y%j')+timedelta(milliseconds=int(stamp[1]))
+                try:
+                    value = float(imageinfo[name.lower()][0])
+                except (KeyError, ValueError, TypeError, IndexError):
+                    value = np.nan
+                img[name] = ('date', [value])
             img['pointing_time'] = ('date', [np.datetime64(exact_time, 'ns')])
+            img['pointing_valid'] = ('date', [_pointing_record_valid(img)])
             for name in ['GLAT', 'GLON', 'SZA', 'DZA']:
                 img['pointing_'+name] = (['date', 'row', 'col'], np.asarray(imageinfo[name.lower()][0])[None].copy())
 
@@ -191,38 +238,51 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
             available_fields = imageinfo.dtype.names if hasattr(imageinfo, 'dtype') and imageinfo.dtype.names else imageinfo.keys()
             available_fields = {field.lower() for field in available_fields}
             missing_fields = [field.upper() for field in required_fields if field not in available_fields]
-            if missing_fields:
+            if missing_fields and not pointing_metadata:
                 raise ValueError(f"Viewing geometry requires FUVVIEW3 field(s): {', '.join(missing_fields)}")
 
-            spacecraft_radius = np.linalg.norm(np.asarray(imageinfo['o_gci'][0], dtype=float))
-            spacecraft_latitude = float(imageinfo['lat_ctr'][0])
-            spacecraft_longitude = float(imageinfo['lon_ctr'][0])
-            emission_height = float(imageinfo['emis_hgt'][0])
-            subsolar_latitude, subsolar_longitude = subsol([image_time])
-            geometry = calculate_viewing_geometry(img['glat'].values, img['glon'].values, spacecraft_radius, spacecraft_latitude, spacecraft_longitude, emission_height, subsolar_latitude[0], subsolar_longitude[0])
+            geometry_ready = not pointing_metadata or _viewing_state_valid(img)
+            if geometry_ready:
+                spacecraft_radius = np.linalg.norm(np.asarray(imageinfo['o_gci'][0], dtype=float))
+                spacecraft_latitude = float(imageinfo['lat_ctr'][0])
+                spacecraft_longitude = float(imageinfo['lon_ctr'][0])
+                emission_height = float(imageinfo['emis_hgt'][0])
+                subsolar_latitude, subsolar_longitude = subsol([image_time])
+                geometry = calculate_viewing_geometry(img['glat'].values, img['glon'].values, spacecraft_radius, spacecraft_latitude, spacecraft_longitude, emission_height, subsolar_latitude[0], subsolar_longitude[0])
+            else:
+                empty = np.full(img['dza'].shape, np.nan)
+                geometry = {'dza': empty, 'solar_view_cosine_factor': empty.copy(), 'solar_view_sine_factor': empty.copy()}
 
-            valid_dza = np.isfinite(geometry['dza']) & np.isfinite(img['dza'].values) & (img['dza'].values >= 0)
-            if not np.any(valid_dza):
-                stored_valid = np.isfinite(img['dza'].values) & (img['dza'].values >= 0)
-                reconstructed_valid = np.isfinite(geometry['dza']) & (geometry['dza'] >= 0)
-                if skip_unmapped and not np.any(stored_valid) and not np.any(reconstructed_valid):
-                    skipped_unmapped.append(str(filenames[i]))
-                    warnings.warn(f"Skipping unmapped {inst_id} frame {filenames[i]}: no valid stored or reconstructed DZA pixels", RuntimeWarning, stacklevel=2)
-                    continue
-                raise ValueError("Viewing geometry could not be validated because the frame contains no valid DZA pixels")
+            if geometry_ready:
+                valid_dza = np.isfinite(geometry['dza']) & np.isfinite(img['dza'].values) & (img['dza'].values >= 0)
+                if not np.any(valid_dza):
+                    stored_valid = np.isfinite(img['dza'].values) & (img['dza'].values >= 0)
+                    reconstructed_valid = np.isfinite(geometry['dza']) & (geometry['dza'] >= 0)
+                    if skip_unmapped and not np.any(stored_valid) and not np.any(reconstructed_valid):
+                        if pointing_metadata and bool(img.pointing_valid.values[0]):
+                            metadata_only.append(str(filenames[i]))
+                        else:
+                            skipped_unmapped.append(str(filenames[i]))
+                            warnings.warn(f"Skipping unmapped {inst_id} frame {filenames[i]}: no valid stored or reconstructed DZA pixels", RuntimeWarning, stacklevel=2)
+                            continue
+                    else:
+                        raise ValueError("Viewing geometry could not be validated because the frame contains no valid DZA pixels")
 
-            maximum_dza_error = np.max(np.abs(geometry['dza'][valid_dza] - img['dza'].values[valid_dza]))
-            if maximum_dza_error > 1e-3:
-                raise ValueError(f"Reconstructed viewing geometry disagrees with stored DZA by up to {maximum_dza_error:.4g} degrees")
+                if np.any(valid_dza):
+                    maximum_dza_error = np.max(np.abs(geometry['dza'][valid_dza] - img['dza'].values[valid_dza]))
+                    if maximum_dza_error > 1e-3:
+                        raise ValueError(f"Reconstructed viewing geometry disagrees with stored DZA by up to {maximum_dza_error:.4g} degrees")
 
             img['solar_view_cosine_factor'] = (['date', 'row', 'col'], geometry['solar_view_cosine_factor'])
             img['solar_view_sine_factor'] = (['date', 'row', 'col'], geometry['solar_view_sine_factor'])
             coordinates.extend(['solar_view_cosine_factor', 'solar_view_sine_factor'])
 
         # Select hemisphere
-        if hemisphere =='south' or (hemisphere is None and np.nanmedian(img['mlat'])<0):
+        mapped_mlat = img['mlat'].values[np.isfinite(img['mlat'].values)]
+        median_mlat = np.median(mapped_mlat) if mapped_mlat.size else np.nan
+        if hemisphere =='south' or (hemisphere is None and median_mlat<0):
             img=img.assign({'hemisphere': 'south'})
-        elif hemisphere == 'north' or (hemisphere is None and np.nanmedian(img['mlat'])>0):
+        elif hemisphere == 'north' or (hemisphere is None and median_mlat>0):
             img=img.assign({'hemisphere': 'north'})
         else:
             img=img.assign({'hemisphere': 'na'})
@@ -241,17 +301,23 @@ def read_idl(filenames, dzalim=80, hemisphere=None, reflat=True, remove_bad=True
             airglow_scales.append(np.asarray(imageinfo['airglow_scale'][0], dtype=float))
 
     if not imgs:
-        raise ValueError("No frames remain after excluding files with no stored or reconstructed DZA pixels")
+        raise ValueError("No frames remain after excluding unusable IDL files")
     imgs = xr.concat(imgs, dim='date', data_vars='all')
     imgs = imgs.assign({'id':  imageinfo['inst_id'][0].strip().decode('utf8')})
     if skipped_unmapped:
         imgs.attrs['skipped_unmapped_files'] = '\n'.join(skipped_unmapped)
+    if skipped_invalid_time:
+        imgs.attrs['skipped_invalid_time_files'] = '\n'.join(skipped_invalid_time)
+        imgs.attrs['pointing_invalid_time_audit'] = '\n'.join(invalid_time_audit)
+    if metadata_only:
+        imgs.attrs['metadata_only_files'] = '\n'.join(metadata_only)
     imgs = _add_frame_quality(imgs, frame_quality_thresholds)
     if pointing_metadata:
         imgs.attrs['pointing_dzalim'] = float(dzalim)
         imgs.attrs['pointing_metadata'] = 'Original FUVVIEW3 state and native coordinates retained; correction not yet applied'
         imgs.O_GCI.attrs = {'long_name': 'Original spacecraft position in GCI', 'units': 'km'}
         imgs.pointing_time.attrs = {'long_name': 'Original IMAGE timestamp including milliseconds'}
+        imgs.pointing_valid.attrs = {'long_name': 'Usable per-frame pointing metadata', 'definition': 'finite spacecraft state, unit spin axis, integer spin, valid camera geometry fields; independent of image quality and mapped pixels', 'spin_axis_norm_tolerance': 1e-3}
 
     # Use the calibrated detector image before optional WIC reflattening.
     # Reflattening is treated as a deterministic additive adjustment, so this

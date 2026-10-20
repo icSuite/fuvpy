@@ -7,7 +7,7 @@ from scipy.io import readsav
 import xarray as xr
 
 import fuvpy.src.load as load
-from fuvpy.src.load import read_idl
+from fuvpy.src.load import _pointing_record_valid, read_idl
 from fuvpy.src.viewing_geometry import calculate_viewing_geometry
 
 
@@ -47,25 +47,60 @@ def si12_records(monkeypatch):
     return records
 
 
-def test_unmapped_files_are_skipped_only_when_requested_and_recorded(si12_records):
+def test_unmapped_files_remain_available_as_metadata_only_frames(si12_records):
     names = list(si12_records)
     with pytest.raises(ValueError, match='no valid DZA pixels'):
         read_idl(names, reflat=False, pointing_metadata=True)
     settings = {'reflat': False, 'pointing_metadata': True, 'measurement_variance': True, 'poisson_offset': .5}
-    with pytest.warns(RuntimeWarning, match='Skipping unmapped SI12 frame') as messages:
-        result = read_idl(names, skip_unmapped=True, **settings)
-    assert len(messages) == 2
-    assert 'frame_1.idl' in str(messages[0].message) and 'frame_2.idl' in str(messages[1].message)
-    expected = read_idl(['frame_0.idl', 'frame_3.idl'], **settings)
-    assert result.sizes['date'] == 2
-    assert result.attrs.pop('skipped_unmapped_files') == 'frame_1.idl\nframe_2.idl'
-    xr.testing.assert_identical(result, expected)
+    result = read_idl(names, skip_unmapped=True, **settings)
+    assert result.sizes['date'] == 4
+    assert result.attrs['metadata_only_files'] == 'frame_1.idl\nframe_2.idl'
+    np.testing.assert_array_equal(result.pointing_valid, True)
+    np.testing.assert_array_equal(result.frame_quality.values[1:3], 0)
+    assert not np.any(np.isfinite(result.dza.values[1:3]))
 
 
-def test_all_unmapped_files_raise_clear_error(si12_records):
-    with pytest.warns(RuntimeWarning, match='Skipping unmapped SI12 frame'):
-        with pytest.raises(ValueError, match='No frames remain'):
-            read_idl(['frame_1.idl', 'frame_2.idl'], reflat=False, pointing_metadata=True, skip_unmapped=True)
+def test_all_unmapped_files_remain_metadata_only(si12_records):
+    result = read_idl(['frame_1.idl', 'frame_2.idl'], reflat=False, pointing_metadata=True, skip_unmapped=True)
+    np.testing.assert_array_equal(result.pointing_valid, True)
+    np.testing.assert_array_equal(result.frame_quality, 0)
+
+
+@pytest.mark.parametrize('problem', ['axis', 'phase', 'position', 'latitude', 'height', 'alignment'])
+def test_corrupt_pointing_fields_are_flagged_per_frame(si12_records, problem):
+    record = si12_records['frame_0.idl']
+    if problem == 'axis':
+        record['a_gci3'][0][:] = .7247730218805373
+    elif problem == 'phase':
+        record['spin_phase'][0] = np.nan
+    elif problem == 'position':
+        record['o_gci'][0][:] = 0
+    elif problem == 'latitude':
+        record['lat_ctr'][0] = 95
+    elif problem == 'height':
+        record['emis_hgt'][0] = np.nan
+    else:
+        record['inst_roll'][0] = np.nan
+    result = read_idl(['frame_0.idl', 'frame_3.idl'], reflat=False, pointing_metadata=True, skip_unmapped=True)
+    np.testing.assert_array_equal(result.pointing_valid.values, [False, True])
+    assert result.frame_quality.values[0] == 2
+
+
+def test_fractional_spin_is_invalid_but_repeated_integer_spin_is_valid(si12_records):
+    result = read_idl(['frame_0.idl', 'frame_3.idl'], reflat=False, pointing_metadata=True)
+    assert result.SPIN.values[0] == result.SPIN.values[1]
+    np.testing.assert_array_equal(result.pointing_valid, True)
+    result.SPIN.values[0] += .5
+    assert not _pointing_record_valid(result.isel(date=[0]))
+
+
+def test_unreadable_pointing_time_is_skipped_with_filename(si12_records):
+    si12_records['frame_0.idl']['time'][0][1] = 100000000
+    with pytest.warns(RuntimeWarning, match='invalid TIME'):
+        result = read_idl(['frame_0.idl', 'frame_3.idl'], reflat=False, pointing_metadata=True, skip_unmapped=True)
+    assert result.sizes['date'] == 1
+    assert result.attrs['skipped_invalid_time_files'] == 'frame_0.idl'
+    assert result.attrs['pointing_invalid_time_audit'].startswith('frame_0.idl\tpointing_valid=false\treason=invalid_time\t')
 
 
 @pytest.mark.parametrize('problem', ['mismatch', 'stored_only', 'reconstructed_only'])
